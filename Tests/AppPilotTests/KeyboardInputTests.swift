@@ -18,19 +18,108 @@ struct KeyboardInputTests {
     @Test("KB-01: Basic alphanumeric text input - perfect match required",
           .tags(.integration, .keyboard))
     func testBasicAlphanumericInput() async throws {
-        try await performKeyboardTest(keyboardTestCases[0])
+        let testCase = keyboardTestCases[0]
+        
+        // Setup
+        #expect(try await client.healthCheck(), "API must be healthy")
+        try await client.resetState()
+        _ = try await client.startSession()
+        
+        let readinessInfo = try await discovery.verifyTestAppReadiness()
+        #expect(readinessInfo.isReady, "TestApp must be ready")
+        
+        let pilot = AppPilot()
+        
+        // Execute typing
+        let result = try await pilot.type(
+            text: testCase.input,
+            into: readinessInfo.window.id,
+            policy: .STAY_HIDDEN
+        )
+        
+        #expect(result.success, "Type operation should succeed")
+        
+        // Wait for text processing
+        try await Task.sleep(nanoseconds: 200_000_000)
+        
+        // Verify accuracy
+        let keyboardResults = try await client.getKeyboardTests()
+        #expect(!keyboardResults.isEmpty, "Should have keyboard test results")
+        
+        let latestResult = keyboardResults.last!
+        #expect(latestResult.accuracy >= testCase.expectedAccuracy, 
+               "Accuracy (\(latestResult.accuracy)) should meet requirement (\(testCase.expectedAccuracy))")
+        #expect(latestResult.expectedText == testCase.input, "Expected text should match")
+        
+        _ = try await client.endSession()
     }
     
     @Test("KB-02: Japanese Unicode text input - 98% accuracy required",
           .tags(.integration, .keyboard, .unicode))
     func testJapaneseUnicodeInput() async throws {
-        try await performKeyboardTest(keyboardTestCases[1])
+        let testCase = keyboardTestCases[1]
+        
+        #expect(try await client.healthCheck(), "API must be healthy")
+        try await client.resetState()
+        _ = try await client.startSession()
+        
+        let readinessInfo = try await discovery.verifyTestAppReadiness()
+        #expect(readinessInfo.isReady, "TestApp must be ready")
+        
+        let pilot = AppPilot()
+        
+        let result = try await pilot.type(
+            text: testCase.input,
+            into: readinessInfo.window.id,
+            policy: .STAY_HIDDEN
+        )
+        
+        #expect(result.success, "Type operation should succeed")
+        
+        try await Task.sleep(nanoseconds: 300_000_000) // Extra time for Unicode
+        
+        let keyboardResults = try await client.getKeyboardTests()
+        #expect(!keyboardResults.isEmpty, "Should have keyboard test results")
+        
+        let latestResult = keyboardResults.last!
+        #expect(latestResult.accuracy >= testCase.expectedAccuracy, 
+               "Unicode accuracy (\(latestResult.accuracy)) should meet requirement (\(testCase.expectedAccuracy))")
+        
+        _ = try await client.endSession()
     }
     
     @Test("KB-03: Control characters - 95% accuracy required",
           .tags(.integration, .keyboard, .controlChars))
     func testControlCharacters() async throws {
-        try await performKeyboardTest(keyboardTestCases[2])
+        let testCase = keyboardTestCases[2]
+        
+        #expect(try await client.healthCheck(), "API must be healthy")
+        try await client.resetState()
+        _ = try await client.startSession()
+        
+        let readinessInfo = try await discovery.verifyTestAppReadiness()
+        #expect(readinessInfo.isReady, "TestApp must be ready")
+        
+        let pilot = AppPilot()
+        
+        let result = try await pilot.type(
+            text: testCase.input,
+            into: readinessInfo.window.id,
+            policy: .STAY_HIDDEN
+        )
+        
+        #expect(result.success, "Type operation should succeed")
+        
+        try await Task.sleep(nanoseconds: 300_000_000)
+        
+        let keyboardResults = try await client.getKeyboardTests()
+        #expect(!keyboardResults.isEmpty, "Should have keyboard test results")
+        
+        let latestResult = keyboardResults.last!
+        #expect(latestResult.accuracy >= testCase.expectedAccuracy, 
+               "Control character accuracy (\(latestResult.accuracy)) should meet requirement (\(testCase.expectedAccuracy))")
+        
+        _ = try await client.endSession()
     }
     
     

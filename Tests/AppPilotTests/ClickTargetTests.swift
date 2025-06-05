@@ -4,268 +4,256 @@ import Foundation
 
 @Suite("Click Target Tests (CT)")
 struct ClickTargetTests {
-    private let config = TestConfiguration(verboseLogging: true)
+    private let config = TestConfiguration(verboseLogging: false)
     private let client = TestAppClient()
     private let discovery = TestAppDiscovery(config: TestConfiguration())
     
     @Test("CT-01: Click targets with UNMINIMIZE policy",
         .tags(.integration))
-    func testClickTargetsWithUnminimizePolicySafe() async throws {
-        print("🧪 Starting safe click target test...")
+    func testClickTargetsWithUnminimizePolicy() async throws {
+        // 1. Prerequisites validation
+        let isHealthy = try await client.healthCheck()
+        #expect(isHealthy, "TestApp API must be healthy")
         
-        // Phase 1: Setup and validation
-        print("\n📋 Phase 1: Setup and validation")
+        try await client.resetState()
+        let sessionId = try await client.startSession()
+        #expect(!sessionId.isEmpty, "Session ID should not be empty")
         
-        do {
-            // API connection test
-            print("   Testing API connection...")
-            let isHealthy = try await client.healthCheck()
-            if !isHealthy {
-                print("   ❌ API not healthy, skipping test")
-                return
-            }
-            print("   ✅ API is healthy")
-            
-            // Reset state
-            print("   Resetting state...")
-            try await client.resetState()
-            print("   ✅ State reset successful")
-            
-            // Start session
-            print("   Starting session...")
-            let sessionId = try await client.startSession()
-            print("   ✅ Session started: \(sessionId)")
-            
-        } catch {
-            print("   ❌ Setup failed: \(error)")
-            throw error
-        }
-        
-        // Phase 2: TestApp discovery
-        print("\n📋 Phase 2: TestApp discovery")
-        
-        let readinessInfo: TestAppReadinessInfo
-        do {
-            readinessInfo = try await discovery.verifyTestAppReadiness()
-            if !readinessInfo.isReady {
-                print("   ❌ TestApp not ready")
-                throw TestAppDiscoveryError.testAppNotFound
-            }
-            print("   ✅ TestApp is ready")
-            print("   📱 App: \(readinessInfo.app.name)")
-            print("   🪟 Window: \(readinessInfo.window.title ?? "Untitled")")
-            
-        } catch {
-            print("   ❌ Discovery failed: \(error)")
-            throw error
-        }
+        let readinessInfo = try await discovery.verifyTestAppReadiness()
+        #expect(readinessInfo.isReady, "TestApp must be ready for testing")
         
         let testWindow = readinessInfo.window
+        #expect(testWindow.id.id > 0, "Window ID must be valid")
         
-        // Phase 3: Get initial targets
-        print("\n📋 Phase 3: Get initial targets")
+        // 2. Get and validate initial targets
+        let initialTargets = try await client.getClickTargets()
+        #expect(!initialTargets.isEmpty, "At least one click target must be available")
+        #expect(initialTargets.count >= 3, "Should have at least 3 targets for meaningful test")
         
-        let initialTargets: [ClickTargetState]
-        do {
-            initialTargets = try await client.getClickTargets()
-            print("   ✅ Found \(initialTargets.count) click targets")
-            
-            for target in initialTargets {
-                print("   🎯 Target \(target.id): \(target.label) at (\(target.position.x), \(target.position.y)) - clicked: \(target.isClicked)")
-            }
-            
-            if initialTargets.isEmpty {
-                print("   ❌ No targets found, cannot proceed")
-                return
-            }
-            
-        } catch {
-            print("   ❌ Failed to get targets: \(error)")
-            throw error
+        // Validate all targets are initially unclicked
+        for target in initialTargets {
+            #expect(!target.isClicked, "Target \(target.id) should start unclicked")
+            #expect(target.position.x >= 0 && target.position.y >= 0, "Target position should be valid")
         }
         
-        // Phase 4: AppPilot setup
-        print("\n📋 Phase 4: AppPilot setup")
+        // 3. Initialize AppPilot
         let pilot = AppPilot()
-        print("   ✅ AppPilot instance created")
         
-        // Phase 5: Execute clicks with error handling
-        print("\n📋 Phase 5: Execute clicks")
+        // 4. Execute clicks and validate results
+        var results: [ClickTestResult] = []
         
-        var successCount = 0
-        var failureCount = 0
-        let results: [SafeTestResult] = []
-        
-        for (index, target) in initialTargets.enumerated() {
-            print("\n   🎯 Testing target \(index + 1)/\(initialTargets.count): \(target.label)")
-            print("      Position: (\(target.position.x), \(target.position.y))")
-            
+        for target in initialTargets {
             let startTime = Date()
-            var testResult: SafeTestResult
             
-            do {
-                // Execute click
-                print("      Executing click...")
-                let result = try await pilot.click(
-                    window: testWindow.id,
-                    at: Point(x: target.position.x, y: target.position.y),
-                    button: .left,
-                    count: 1,
-                    policy: .UNMINIMIZE(),
-                    route: nil
-                )
-                
-                let duration = Date().timeIntervalSince(startTime)
-                print("      ✅ Click executed: success=\(result.success), route=\(result.route), duration=\(String(format: "%.3f", duration * 1000))ms")
-                
-                // Verify result
-                print("      Verifying target state...")
-                let isClicked = try await client.validateClickTarget(id: target.id)
-                print("      📊 Target clicked: \(isClicked)")
-                
-                let overallSuccess = result.success && isClicked
-                
-                testResult = SafeTestResult(
-                    targetId: target.id,
-                    success: overallSuccess,
-                    pilotSuccess: result.success,
-                    targetClicked: isClicked,
-                    route: result.route,
-                    duration: duration,
-                    error: nil
-                )
-                
-                if overallSuccess {
-                    successCount += 1
-                    print("      🎉 Overall success for \(target.label)")
-                } else {
-                    failureCount += 1
-                    print("      ⚠️ Partial success for \(target.label): pilot=\(result.success), target=\(isClicked)")
-                }
-                
-            } catch {
-                let duration = Date().timeIntervalSince(startTime)
-                failureCount += 1
-                
-                testResult = SafeTestResult(
-                    targetId: target.id,
-                    success: false,
-                    pilotSuccess: false,
-                    targetClicked: false,
-                    route: nil,
-                    duration: duration,
-                    error: error
-                )
-                
-                print("      ❌ Click failed for \(target.label): \(error)")
-            }
+            // Execute click operation
+            let actionResult = try await pilot.click(
+                window: testWindow.id,
+                at: Point(x: target.position.x, y: target.position.y),
+                button: .left,
+                count: 1,
+                policy: .UNMINIMIZE(),
+                route: nil
+            )
+            
+            let duration = Date().timeIntervalSince(startTime)
+            
+            // Validate basic action result
+            #expect(actionResult.success, "Click action should succeed for target \(target.id)")
+            #expect([Route.APPLE_EVENT, Route.AX_ACTION, Route.UI_EVENT].contains(actionResult.route), 
+                   "Route should be one of the valid routes")
+            #expect(duration < 5.0, "Click should complete within 5 seconds")
+            
+            // Wait briefly for UI update
+            try await Task.sleep(nanoseconds: 100_000_000) // 100ms
+            
+            // Verify target state changed
+            let isClicked = try await client.validateClickTarget(id: target.id)
+            #expect(isClicked, "Target \(target.id) should be marked as clicked after operation")
+            
+            let result = ClickTestResult(
+                targetId: target.id,
+                targetLabel: target.label,
+                success: actionResult.success && isClicked,
+                route: actionResult.route,
+                duration: duration
+            )
+            results.append(result)
             
             // Small delay between clicks
-            try await Task.sleep(nanoseconds: 500_000_000) // 500ms
+            try await Task.sleep(nanoseconds: 200_000_000) // 200ms
         }
         
-        // Phase 6: Results summary
-        print("\n📋 Phase 6: Results summary")
+        // 5. Validate overall results
+        let successfulResults = results.filter { $0.success }
+        let successRate = Double(successfulResults.count) / Double(results.count)
         
-        let totalTargets = initialTargets.count
-        let successRate = totalTargets > 0 ? Double(successCount) / Double(totalTargets) : 0.0
+        #expect(successRate >= config.successRateThreshold, 
+               "Success rate (\(String(format: "%.1f", successRate * 100))%) must meet threshold (\(String(format: "%.1f", config.successRateThreshold * 100))%)")
         
-        print("   📊 Test Results:")
-        print("      Total targets: \(totalTargets)")
-        print("      Successful: \(successCount)")
-        print("      Failed: \(failureCount)")
-        print("      Success rate: \(String(format: "%.1f", successRate * 100))%")
+        // 6. Validate performance
+        let averageResponseTime = results.map { $0.duration }.reduce(0, +) / Double(results.count)
+        #expect(averageResponseTime <= 2.0, "Average response time should be under 2 seconds")
         
-        // Phase 7: End session
-        print("\n📋 Phase 7: Cleanup")
+        // 7. Validate route distribution
+        let usedRoutes = Set(successfulResults.map { $0.route })
+        #expect(!usedRoutes.isEmpty, "At least one routing strategy should be used")
         
-        do {
-            let session = try await client.endSession()
-            print("   ✅ Session ended with success rate: \(String(format: "%.1f", session.successRate * 100))%")
-        } catch {
-            print("   ⚠️ Failed to end session: \(error)")
-        }
+        // 8. End session and validate final state
+        let session = try await client.endSession()
+        #expect(session.successRate >= config.successRateThreshold, 
+               "Session success rate should meet threshold")
+        #expect(session.totalTests == initialTargets.count, 
+               "Session should record all test operations")
+    }
+    
+    @Test("CT-02: Click targets with AX_ACTION route",
+        .tags(.integration))
+    func testClickTargetsWithAXRoute() async throws {
+        // Setup
+        #expect(try await client.healthCheck(), "API must be healthy")
+        try await client.resetState()
+        _ = try await client.startSession()
         
-        // Final assertions with safe checks
-        print("\n📋 Final validation")
+        let readinessInfo = try await discovery.verifyTestAppReadiness()
+        #expect(readinessInfo.isReady, "TestApp must be ready")
         
-        if successRate < config.successRateThreshold {
-            print("   ⚠️ Success rate (\(String(format: "%.1f", successRate * 100))%) below threshold (\(String(format: "%.1f", config.successRateThreshold * 100))%)")
-            // Don't throw - just log the issue
-        } else {
-            print("   ✅ Success rate meets threshold")
-        }
+        let targets = try await client.getClickTargets()
+        #expect(!targets.isEmpty, "Targets must be available")
         
-        if successCount == 0 {
-            print("   ⚠️ No successful clicks - this indicates a serious problem")
-            // Don't throw - just log the issue
-        } else {
-            print("   ✅ At least some clicks succeeded")
-        }
+        let pilot = AppPilot()
+        let firstTarget = targets[0]
         
-        print("🧪 Safe click target test completed")
+        // Test AX route specifically
+        let result = try await pilot.click(
+            window: readinessInfo.window.id,
+            at: Point(x: firstTarget.position.x, y: firstTarget.position.y),
+            policy: .UNMINIMIZE(),
+            route: .AX_ACTION
+        )
+        
+        #expect(result.success, "AX route click should succeed")
+        #expect(result.route == .AX_ACTION, "Should use AX_ACTION route")
+        
+        // Verify target was clicked
+        try await Task.sleep(nanoseconds: 100_000_000)
+        let isClicked = try await client.validateClickTarget(id: firstTarget.id)
+        #expect(isClicked, "Target should be clicked via AX route")
+        
+        _ = try await client.endSession()
+    }
+    
+    @Test("CT-03: Click targets with UI_EVENT route",
+        .tags(.integration))
+    func testClickTargetsWithUIEventRoute() async throws {
+        // Setup
+        #expect(try await client.healthCheck(), "API must be healthy")
+        try await client.resetState()
+        _ = try await client.startSession()
+        
+        let readinessInfo = try await discovery.verifyTestAppReadiness()
+        #expect(readinessInfo.isReady, "TestApp must be ready")
+        
+        let targets = try await client.getClickTargets()
+        #expect(targets.count >= 2, "Need at least 2 targets")
+        
+        let pilot = AppPilot()
+        let secondTarget = targets[1]
+        
+        // Test UI Event route specifically
+        let result = try await pilot.click(
+            window: readinessInfo.window.id,
+            at: Point(x: secondTarget.position.x, y: secondTarget.position.y),
+            policy: .UNMINIMIZE(),
+            route: .UI_EVENT
+        )
+        
+        #expect(result.success, "UI Event route click should succeed")
+        #expect(result.route == .UI_EVENT, "Should use UI_EVENT route")
+        
+        // Verify target was clicked
+        try await Task.sleep(nanoseconds: 100_000_000)
+        let isClicked = try await client.validateClickTarget(id: secondTarget.id)
+        #expect(isClicked, "Target should be clicked via UI Event route")
+        
+        _ = try await client.endSession()
+    }
+    
+    @Test("CT-04: Performance validation - response time under 2s",
+        .tags(.performance))
+    func testClickPerformance() async throws {
+        // Setup
+        #expect(try await client.healthCheck(), "API must be healthy")
+        try await client.resetState()
+        _ = try await client.startSession()
+        
+        let readinessInfo = try await discovery.verifyTestAppReadiness()
+        #expect(readinessInfo.isReady, "TestApp must be ready")
+        
+        let targets = try await client.getClickTargets()
+        #expect(!targets.isEmpty, "Targets must be available")
+        
+        let pilot = AppPilot()
+        let target = targets[0]
+        
+        // Measure click performance
+        let startTime = Date()
+        let result = try await pilot.click(
+            window: readinessInfo.window.id,
+            at: Point(x: target.position.x, y: target.position.y),
+            policy: .UNMINIMIZE()
+        )
+        let duration = Date().timeIntervalSince(startTime)
+        
+        #expect(result.success, "Click should succeed")
+        #expect(duration < 2.0, "Click should complete within 2 seconds, actual: \(duration)s")
+        #expect(duration > 0.001, "Click should take measurable time")
+        
+        _ = try await client.endSession()
     }
     
     @Test("CT-Debug: Individual target test")
     func testIndividualTarget() async throws {
-        print("🔍 Testing individual target...")
-        
-        // Basic setup
+        // Strict validation without print statements
         let isHealthy = try await client.healthCheck()
-        guard isHealthy else {
-            print("❌ API not healthy")
-            return
-        }
+        #expect(isHealthy, "API must be healthy")
         
         try await client.resetState()
-        let _ = try await client.startSession()
+        let sessionId = try await client.startSession()
+        #expect(!sessionId.isEmpty, "Session should start successfully")
         
         let readinessInfo = try await discovery.verifyTestAppReadiness()
-        guard readinessInfo.isReady else {
-            print("❌ TestApp not ready")
-            return
-        }
+        #expect(readinessInfo.isReady, "TestApp must be ready")
         
         let targets = try await client.getClickTargets()
-        guard let firstTarget = targets.first else {
-            print("❌ No targets available")
-            return
-        }
+        #expect(!targets.isEmpty, "At least one target must be available")
         
-        print("🎯 Testing first target: \(firstTarget.label)")
-        
+        let firstTarget = targets[0]
         let pilot = AppPilot()
         
-        do {
-            let result = try await pilot.click(
-                window: readinessInfo.window.id,
-                at: Point(x: firstTarget.position.x, y: firstTarget.position.y),
-                policy: .UNMINIMIZE()
-            )
-            
-            print("✅ Click result: \(result.success) via \(result.route)")
-            
-            // Check target state
-            let isClicked = try await client.validateClickTarget(id: firstTarget.id)
-            print("📊 Target state: \(isClicked ? "clicked" : "not clicked")")
-            
-        } catch {
-            print("❌ Click failed: \(error)")
-        }
+        let result = try await pilot.click(
+            window: readinessInfo.window.id,
+            at: Point(x: firstTarget.position.x, y: firstTarget.position.y),
+            policy: .UNMINIMIZE()
+        )
         
-        try await client.endSession()
-        print("🔍 Individual target test completed")
+        #expect(result.success, "Click should succeed")
+        
+        // Verify target state
+        try await Task.sleep(nanoseconds: 100_000_000)
+        let isClicked = try await client.validateClickTarget(id: firstTarget.id)
+        #expect(isClicked, "Target should be clicked")
+        
+        let session = try await client.endSession()
+        #expect(session.successfulTests > 0, "Session should record successful test")
     }
 }
 
 // MARK: - Supporting Types
 
-struct SafeTestResult {
+struct ClickTestResult {
     let targetId: String
+    let targetLabel: String
     let success: Bool
-    let pilotSuccess: Bool
-    let targetClicked: Bool
-    let route: Route?
+    let route: Route
     let duration: TimeInterval
-    let error: Error?
 }
