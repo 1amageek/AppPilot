@@ -170,8 +170,16 @@ public actor AppPilot {
         // Determine window and app for the command
         let (window, app) = extractTargets(from: command)
         
+        // Check if route is explicitly specified
+        let explicitRoute = extractExplicitRoute(from: command)
+        
         // Select route
-        let route = await commandRouter.selectRoute(for: command, app: app, window: window)
+        let route: Route
+        if let explicitRoute = explicitRoute {
+            route = explicitRoute
+        } else {
+            route = await commandRouter.selectRoute(for: command, app: app, window: window)
+        }
         
         // Prepare visibility if needed
         if route == .UI_EVENT {
@@ -180,25 +188,31 @@ public actor AppPilot {
             }
         }
         
-        // Execute with fallback
-        do {
+        // Execute - with or without fallback based on route specification
+        if explicitRoute != nil {
+            // Route explicitly specified - don't use fallback
             return try await commandRouter.execute(command, with: route)
-        } catch {
-            // Try fallback routes
-            let fallbackRoutes = getFallbackRoutes(for: route)
-            
-            for fallbackRoute in fallbackRoutes {
-                do {
-                    if fallbackRoute == .UI_EVENT, let window = window, let policy = extractPolicy(from: command) {
-                        try await visibilityManager.prepareWindow(window, policy: policy)
+        } else {
+            // Route auto-selected - use fallback on failure
+            do {
+                return try await commandRouter.execute(command, with: route)
+            } catch {
+                // Try fallback routes
+                let fallbackRoutes = getFallbackRoutes(for: route)
+                
+                for fallbackRoute in fallbackRoutes {
+                    do {
+                        if fallbackRoute == .UI_EVENT, let window = window, let policy = extractPolicy(from: command) {
+                            try await visibilityManager.prepareWindow(window, policy: policy)
+                        }
+                        return try await commandRouter.execute(command, with: fallbackRoute)
+                    } catch {
+                        continue
                     }
-                    return try await commandRouter.execute(command, with: fallbackRoute)
-                } catch {
-                    continue
                 }
+                
+                throw PilotError.ROUTE_UNAVAILABLE("All routes failed: \(error)")
             }
-            
-            throw PilotError.ROUTE_UNAVAILABLE("All routes failed: \(error)")
         }
     }
     
@@ -227,6 +241,19 @@ public actor AppPilot {
             return cmd.policy
         case let cmd as GestureCommand:
             return cmd.policy
+        default:
+            return nil
+        }
+    }
+    
+    private func extractExplicitRoute(from command: Command) -> Route? {
+        switch command {
+        case let cmd as ClickCommand:
+            return cmd.route
+        case let cmd as TypeCommand:
+            return cmd.route
+        case _ as GestureCommand:
+            return nil // Gestures always use UI_EVENT
         default:
             return nil
         }

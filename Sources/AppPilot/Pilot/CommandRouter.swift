@@ -135,13 +135,25 @@ public actor CommandRouter {
         guard let windowList = CGWindowListCopyWindowInfo([.optionIncludingWindow], window.id) as? [[String: Any]],
               let windowInfo = windowList.first,
               let boundsDict = windowInfo[kCGWindowBounds as String] as? [String: Any],
-              let x = boundsDict["X"] as? CGFloat,
-              let y = boundsDict["Y"] as? CGFloat else {
+              let windowX = boundsDict["X"] as? CGFloat,
+              let windowY = boundsDict["Y"] as? CGFloat,
+              let _ = boundsDict["Width"] as? CGFloat,
+              let windowHeight = boundsDict["Height"] as? CGFloat else {
             throw PilotError.NOT_FOUND(.window, "Window ID: \(window.id)")
         }
         
         // Convert window-relative coordinates to screen coordinates
-        return CGPoint(x: x + point.x, y: y + point.y)
+        // macOS uses bottom-left origin for screen coordinates
+        // TestApp likely uses top-left origin for window coordinates
+        
+        // Convert from top-left window coordinates to bottom-left screen coordinates
+        let screenX = windowX + point.x
+        
+        // For Y coordinate: flip from top-left to bottom-left within window bounds
+        // then add to window's bottom-left position in screen coordinates
+        let screenY = windowY + (windowHeight - point.y)
+        
+        return CGPoint(x: screenX, y: screenY)
     }
     
     private func findElementAtCoordinates(_ point: Point, in window: WindowID) async throws -> AXPath {
