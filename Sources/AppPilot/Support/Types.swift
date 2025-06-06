@@ -1,6 +1,8 @@
 import Foundation
 import CoreGraphics
 
+// MARK: - Core Identifiers
+
 public struct AppID: Hashable, Sendable {
     public let pid: pid_t
     
@@ -17,125 +19,119 @@ public struct WindowID: Hashable, Sendable {
     }
 }
 
-public enum Route: Sendable {
-    case APPLE_EVENT
-    case AX_ACTION
-    case UI_EVENT
-}
-
-public enum Policy: Sendable {
-    case STAY_HIDDEN
-    case UNMINIMIZE(tempMs: Int = 150)
-    case BRING_FORE_TEMP(restore: AppID)
-}
-
-public enum WaitSpec: Sendable {
-    case time(ms: Int)
-    case ui_change(window: WindowID, timeoutMs: Int)
-}
+// MARK: - Geometry
 
 public struct Point: Sendable {
-    public let x: Double
-    public let y: Double
+    public let x: CGFloat
+    public let y: CGFloat
     
-    public init(x: Double, y: Double) {
+    public init(x: CGFloat, y: CGFloat) {
         self.x = x
         self.y = y
     }
+    
+    public init(x: Double, y: Double) {
+        self.x = CGFloat(x)
+        self.y = CGFloat(y)
+    }
 }
+
+// MARK: - Input Types
 
 public enum MouseButton: Sendable {
     case left
     case right
     case center
-}
-
-public struct App: Sendable {
-    public let id: AppID
-    public let name: String
-    public let bundleIdentifier: String?
     
-    public init(id: AppID, name: String, bundleIdentifier: String?) {
-        self.id = id
-        self.name = name
-        self.bundleIdentifier = bundleIdentifier
+    var cgButton: CGMouseButton {
+        switch self {
+        case .left: return .left
+        case .right: return .right
+        case .center: return .center
+        }
+    }
+    
+    var downType: CGEventType {
+        switch self {
+        case .left: return .leftMouseDown
+        case .right: return .rightMouseDown
+        case .center: return .otherMouseDown
+        }
+    }
+    
+    var upType: CGEventType {
+        switch self {
+        case .left: return .leftMouseUp
+        case .right: return .rightMouseUp
+        case .center: return .otherMouseUp
+        }
+    }
+    
+    var dragType: CGEventType {
+        switch self {
+        case .left: return .leftMouseDragged
+        case .right: return .rightMouseDragged
+        case .center: return .otherMouseDragged
+        }
     }
 }
 
-public struct Window: Sendable {
-    public let id: WindowID
-    public let title: String?
-    public let frame: CGRect
-    public let isMinimized: Bool
-    public let app: AppID
-    
-    public init(id: WindowID, title: String?, frame: CGRect, isMinimized: Bool, app: AppID) {
-        self.id = id
-        self.title = title
-        self.frame = frame
-        self.isMinimized = isMinimized
-        self.app = app
-    }
+// MARK: - Wait Specifications
+
+public enum WaitSpec: Sendable {
+    case time(seconds: TimeInterval)
+    case uiChange(window: WindowID, timeout: TimeInterval)
 }
 
-public typealias PNGData = Data
+// MARK: - Result Types
 
 public struct ActionResult: Sendable {
     public let success: Bool
-    public let route: Route
-    public let message: String?
+    public let timestamp: Date
+    public let screenCoordinates: Point?
     
-    public init(success: Bool, route: Route, message: String? = nil) {
+    public init(success: Bool, timestamp: Date = Date(), screenCoordinates: Point? = nil) {
         self.success = success
-        self.route = route
-        self.message = message
+        self.timestamp = timestamp
+        self.screenCoordinates = screenCoordinates
     }
 }
 
-public enum Gesture: Sendable {
-    case scroll(dx: Double, dy: Double)
-    case pinch(scale: Double, center: Point)
-    case rotate(degrees: Double, center: Point)
-    case drag(from: Point, to: Point)
-    case swipe(direction: SwipeDirection, distance: Double)
+// MARK: - Application Info
+
+public struct AppInfo: Sendable {
+    public let id: AppID
+    public let name: String
+    public let bundleIdentifier: String?
+    public let isActive: Bool
+    
+    public init(id: AppID, name: String, bundleIdentifier: String? = nil, isActive: Bool = false) {
+        self.id = id
+        self.name = name
+        self.bundleIdentifier = bundleIdentifier
+        self.isActive = isActive
+    }
 }
 
-public enum SwipeDirection: Sendable {
-    case up, down, left, right
-}
+// MARK: - Window Info
 
-public struct AXNode: Sendable {
-    public let role: String?
+public struct WindowInfo: Sendable {
+    public let id: WindowID
     public let title: String?
-    public let value: String?
-    public let frame: CGRect?
-    public let children: [AXNode]
+    public let bounds: CGRect  // Screen coordinates
+    public let isMinimized: Bool
+    public let appName: String
     
-    public init(role: String?, title: String?, value: String?, frame: CGRect?, children: [AXNode]) {
-        self.role = role
+    public init(id: WindowID, title: String?, bounds: CGRect, isMinimized: Bool, appName: String) {
+        self.id = id
         self.title = title
-        self.value = value
-        self.frame = frame
-        self.children = children
+        self.bounds = bounds
+        self.isMinimized = isMinimized
+        self.appName = appName
     }
 }
 
-public struct AXPath: Sendable {
-    public let components: [String]
-    
-    public init(components: [String]) {
-        self.components = components
-    }
-}
-
-public enum AXAction: String, Sendable {
-    case press = "AXPress"
-    case cancel = "AXCancel"
-    case confirm = "AXConfirm"
-    case increment = "AXIncrement"
-    case decrement = "AXDecrement"
-    case showMenu = "AXShowMenu"
-}
+// MARK: - AX Event Types
 
 public struct AXEvent: Sendable {
     public enum EventType: Sendable {
@@ -148,24 +144,16 @@ public struct AXEvent: Sendable {
         case overflow
     }
     
-    public struct EventData: Sendable {
-        public let description: String
-        
-        public init(description: String) {
-            self.description = description
-        }
-    }
-    
     public let type: EventType
-    public let window: WindowID
+    public let windowID: WindowID
     public let timestamp: Date
-    public let data: EventData?
+    public let description: String?
     
-    public init(type: EventType, window: WindowID, timestamp: Date = Date(), data: EventData? = nil) {
+    public init(type: EventType, windowID: WindowID, timestamp: Date = Date(), description: String? = nil) {
         self.type = type
-        self.window = window
+        self.windowID = windowID
         self.timestamp = timestamp
-        self.data = data
+        self.description = description
     }
 }
 
@@ -186,34 +174,5 @@ public struct AXMask: OptionSet, Sendable {
     public static let all: AXMask = [.created, .moved, .resized, .titleChanged, .focusChanged, .valueChanged]
 }
 
-public struct AppleEventParameters: Sendable {
-    internal let storage: [String: String]
-    
-    public init(_ dict: [String: String] = [:]) {
-        self.storage = dict
-    }
-    
-    public subscript(key: String) -> String? {
-        return storage[key]
-    }
-    
-    public var allKeys: [String] {
-        return Array(storage.keys)
-    }
-    
-    public func forEach(_ body: (String, String) throws -> Void) rethrows {
-        try storage.forEach(body)
-    }
-}
 
-public struct AppleEventSpec: Sendable {
-    public let eventClass: String
-    public let eventID: String
-    public let parameters: AppleEventParameters?
-    
-    public init(eventClass: String, eventID: String, parameters: AppleEventParameters? = nil) {
-        self.eventClass = eventClass
-        self.eventID = eventID
-        self.parameters = parameters
-    }
-}
+public typealias PNGData = Data

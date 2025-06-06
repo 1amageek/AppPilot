@@ -10,12 +10,19 @@ let package = Package(
         .library(
             name: "AppPilot",
             targets: ["AppPilot"]),
+        .executable(
+            name: "BasicUsage",
+            targets: ["BasicUsage"]),
     ],
     dependencies: [
     ],
     targets: [
         .target(
             name: "AppPilot"),
+        .executableTarget(
+            name: "BasicUsage",
+            dependencies: ["AppPilot"],
+            path: "Examples"),
         .testTarget(
             name: "AppPilotTests",
             dependencies: [

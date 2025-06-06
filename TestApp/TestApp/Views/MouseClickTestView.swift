@@ -32,11 +32,18 @@ struct MouseClickTestView: View {
                     .font(.title2)
                     .padding(.bottom)
                 
-                testArea
-                    .frame(width: testAreaSize, height: testAreaSize)
-                    .background(Color.gray.opacity(0.1))
-                    .border(Color.gray, width: 2)
-                    .clipped()
+                GeometryReader { geometry in
+                    testArea
+                        .frame(width: testAreaSize, height: testAreaSize)
+                        .background(Color.gray.opacity(0.1))
+                        .border(Color.gray, width: 2)
+                        .clipped()
+                        .onAppear {
+                            // Update test area frame when geometry changes
+                            updateTestAreaFrame(geometry: geometry)
+                        }
+                }
+                .frame(width: testAreaSize, height: testAreaSize)
                 
                 if showCoordinates, let coord = lastClickCoordinate {
                     Text("Last click: (\(Int(coord.x)), \(Int(coord.y)))")
@@ -54,6 +61,12 @@ struct MouseClickTestView: View {
         }
         .onAppear {
             // Targets are initialized by testStateManager
+            // Connect testResultsManager to testStateManager for external click recording
+            testStateManager.testResultsManager = testResultsManager
+            setupEventMonitoring()
+        }
+        .onDisappear {
+            testStateManager.stopMouseEventMonitoring()
         }
     }
     
@@ -268,6 +281,33 @@ struct MouseClickTestView: View {
             )
             
             testResultsManager.addResult(result)
+        }
+    }
+    
+    private func updateTestAreaFrame(geometry: GeometryProxy) {
+        // Convert the GeometryProxy frame to global coordinates
+        let localFrame = geometry.frame(in: .global)
+        print("🔄 Updating test area frame: \(localFrame)")
+        
+        setupEventMonitoring(testAreaGlobalFrame: localFrame)
+    }
+    
+    private func setupEventMonitoring(testAreaGlobalFrame: CGRect? = nil) {
+        // Get the current window frame
+        if let window = NSApplication.shared.windows.first(where: { $0.isKeyWindow }) {
+            let windowFrame = window.frame
+            let testAreaFrame = testAreaGlobalFrame ?? CGRect(x: 0, y: 0, width: testAreaSize, height: testAreaSize)
+            
+            print("🖱️ Setting up event monitoring for test area")
+            print("   Window frame: \(windowFrame)")
+            print("   Test area frame: \(testAreaFrame)")
+            
+            testStateManager.startMouseEventMonitoring(
+                testAreaFrame: testAreaFrame,
+                windowFrame: windowFrame
+            )
+        } else {
+            print("⚠️ Could not find key window for event monitoring")
         }
     }
     

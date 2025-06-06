@@ -1,272 +1,461 @@
 import Foundation
+import CoreGraphics
+import AppKit
 
 public actor AppPilot {
-    private let commandRouter: CommandRouter
-    private let visibilityManager: VisibilityManager
-    private let spaceController: SpaceController
-    private let liveAXHub: LiveAXHub
+    private let cgEventDriver: CGEventDriver
     private let screenDriver: ScreenDriver
     private let accessibilityDriver: AccessibilityDriver
-    private let coordinateConverter: CoordinateConverter
     
     public init(
-        appleEventDriver: AppleEventDriver? = nil,
-        accessibilityDriver: AccessibilityDriver? = nil,
-        uiEventDriver: UIEventDriver? = nil,
+        cgEventDriver: CGEventDriver? = nil,
         screenDriver: ScreenDriver? = nil,
-        missionControlDriver: MissionControlDriver? = nil
+        accessibilityDriver: AccessibilityDriver? = nil
     ) {
-        let aeDriver = appleEventDriver ?? DefaultAppleEventDriver()
-        let axDriver = accessibilityDriver ?? DefaultAccessibilityDriver()
-        let uiDriver = uiEventDriver ?? DefaultUIEventDriver()
-        let scrDriver = screenDriver ?? DefaultScreenDriver()
-        let mcDriver = missionControlDriver ?? DefaultMissionControlDriver()
+        self.cgEventDriver = cgEventDriver ?? RealCGEventDriver()
+        self.screenDriver = screenDriver ?? DefaultScreenDriver()
+        self.accessibilityDriver = accessibilityDriver ?? DefaultAccessibilityDriver()
+    }
+    
+    // MARK: - Query Operations
+    
+    /// Get all running applications
+    public func listApplications() async throws -> [AppInfo] {
+        print("📱 AppPilot: Listing applications")
         
-        self.commandRouter = CommandRouter(
-            appleEventDriver: aeDriver,
-            accessibilityDriver: axDriver,
-            uiEventDriver: uiDriver
-        )
-        self.visibilityManager = VisibilityManager(
-            accessibilityDriver: axDriver,
-            missionControlDriver: mcDriver
-        )
-        self.spaceController = SpaceController(
-            missionControlDriver: mcDriver
-        )
-        self.liveAXHub = LiveAXHub(
-            accessibilityDriver: axDriver
-        )
-        self.screenDriver = scrDriver
-        self.accessibilityDriver = axDriver
-        self.coordinateConverter = CoordinateConverter()
+        guard let windowList = CGWindowListCopyWindowInfo([.excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else {
+            throw PilotError.osFailure(api: "CGWindowListCopyWindowInfo", code: -1)
+        }
+        
+        var appDict: [pid_t: AppInfo] = [:]
+        
+        for windowInfo in windowList {
+            guard let pid = windowInfo[kCGWindowOwnerPID as String] as? pid_t,
+                  let appName = windowInfo[kCGWindowOwnerName as String] as? String else {
+                continue
+            }
+            
+            if appDict[pid] == nil {
+                let bundleId = getBundleIdentifier(for: pid)
+                let isActive = isApplicationActive(pid: pid)
+                
+                appDict[pid] = AppInfo(
+                    id: AppID(pid: pid),
+                    name: appName,
+                    bundleIdentifier: bundleId,
+                    isActive: isActive
+                )
+            }
+        }
+        
+        let apps = Array(appDict.values).sorted { $0.name < $1.name }
+        print("✅ AppPilot: Found \(apps.count) applications")
+        return apps
     }
     
-    // MARK: - Query Methods
-    
-    public func listApplications() async throws -> [App] {
-        return try await screenDriver.listApplications()
+    /// Get windows for an application
+    public func listWindows(app: AppID) async throws -> [WindowInfo] {
+        print("🪟 AppPilot: Listing windows for app PID \(app.pid)")
+        
+        guard let windowList = CGWindowListCopyWindowInfo([.excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else {
+            throw PilotError.osFailure(api: "CGWindowListCopyWindowInfo", code: -1)
+        }
+        
+        var windows: [WindowInfo] = []
+        
+        for windowInfo in windowList {
+            guard let pid = windowInfo[kCGWindowOwnerPID as String] as? pid_t,
+                  pid == app.pid,
+                  let windowID = windowInfo[kCGWindowNumber as String] as? CGWindowID,
+                  let boundsDict = windowInfo[kCGWindowBounds as String] as? [String: Any],
+                  let x = boundsDict["X"] as? CGFloat,
+                  let y = boundsDict["Y"] as? CGFloat,
+                  let width = boundsDict["Width"] as? CGFloat,
+                  let height = boundsDict["Height"] as? CGFloat else {
+                continue
+            }
+            
+            let title = windowInfo[kCGWindowName as String] as? String
+            let appName = windowInfo[kCGWindowOwnerName as String] as? String ?? "Unknown"
+            let bounds = CGRect(x: x, y: y, width: width, height: height)
+            let isMinimized = isWindowMinimized(windowID: windowID)
+            
+            windows.append(WindowInfo(
+                id: WindowID(id: windowID),
+                title: title,
+                bounds: bounds,
+                isMinimized: isMinimized,
+                appName: appName
+            ))
+        }
+        
+        print("✅ AppPilot: Found \(windows.count) windows")
+        return windows
     }
     
-    public func listWindows(in app: AppID) async throws -> [Window] {
-        let allWindows = try await screenDriver.listWindows()
-        return allWindows.filter { $0.app == app }
+    /// Capture screenshot of window
+    public func capture(window: WindowID) async throws -> CGImage {
+        print("📷 AppPilot: Capturing window \(window.id)")
+        
+        // Use ScreenDriver for screenshot capture
+        let image = try await screenDriver.captureWindow(window)
+        
+        print("✅ AppPilot: Screenshot captured")
+        return image
     }
     
-    public func capture(window: WindowID) async throws -> PNGData {
-        return try await screenDriver.capture(window: window)
+    /// Get window bounds in screen coordinates
+    public func getWindowBounds(window: WindowID) async throws -> CGRect {
+        print("📐 AppPilot: Getting bounds for window \(window.id)")
+        
+        guard let windowList = CGWindowListCopyWindowInfo([.optionIncludingWindow], window.id) as? [[String: Any]],
+              let windowInfo = windowList.first,
+              let boundsDict = windowInfo[kCGWindowBounds as String] as? [String: Any],
+              let x = boundsDict["X"] as? CGFloat,
+              let y = boundsDict["Y"] as? CGFloat,
+              let width = boundsDict["Width"] as? CGFloat,
+              let height = boundsDict["Height"] as? CGFloat else {
+            throw PilotError.windowNotFound(window)
+        }
+        
+        let bounds = CGRect(x: x, y: y, width: width, height: height)
+        print("✅ AppPilot: Window bounds: \(bounds)")
+        return bounds
     }
     
-    public func accessibilityTree(window: WindowID, depth: Int = 10) async throws -> AXNode {
-        return try await accessibilityDriver.getTree(for: window, depth: depth)
+    /// Subscribe to UI changes in window
+    public func subscribeAX(window: WindowID) -> AsyncStream<AXEvent> {
+        print("👀 AppPilot: Subscribing to AX events for window \(window.id)")
+        
+        return AsyncStream<AXEvent> { continuation in
+            Task {
+                // TODO: Implement real AXObserver-based event monitoring
+                // This is a placeholder implementation for development
+                continuation.yield(AXEvent(
+                    type: .created,
+                    windowID: window,
+                    description: "Placeholder AX event"
+                ))
+                continuation.finish()
+            }
+        }
     }
     
-    public func subscribeAX(window: WindowID, mask: AXMask = .all) async -> AsyncStream<AXEvent> {
-        return await liveAXHub.subscribe(to: window, mask: mask)
+    // MARK: - Coordinate Conversion Helper
+    
+    /// Convert window-relative point to screen coordinates
+    public func windowToScreen(point: Point, window: WindowID) async throws -> Point {
+        let bounds = try await getWindowBounds(window: window)
+        return Point(x: bounds.minX + point.x, y: bounds.minY + point.y)
     }
     
-    // MARK: - Command Methods
+    // MARK: - Screen Automation Operations (Global Coordinates)
     
+    /// Click at screen coordinates
     public func click(
-        window: WindowID,
-        at point: Point,
+        at screenPoint: Point,
         button: MouseButton = .left,
-        count: Int = 1,
-        policy: Policy = .UNMINIMIZE(),
-        route: Route? = nil
+        count: Int = 1
     ) async throws -> ActionResult {
-        let command = ClickCommand(
-            window: window,
-            point: point,
-            button: button,
-            count: count,
-            policy: policy,
-            route: route
-        )
+        print("🖱️ AppPilot: Click at screen coordinates (\(screenPoint.x), \(screenPoint.y))")
         
-        return try await executeCommand(command)
+        // Check accessibility permission
+        guard AXIsProcessTrusted() else {
+            throw PilotError.permissionDenied("Accessibility permission required for CGEvent automation")
+        }
+        
+        // Validate coordinates
+        let screenBounds = CGDisplayBounds(CGMainDisplayID())
+        if screenPoint.x < 0 || screenPoint.x > screenBounds.width ||
+           screenPoint.y < 0 || screenPoint.y > screenBounds.height {
+            throw PilotError.coordinateOutOfBounds(screenPoint)
+        }
+        
+        // Use new CGEventDriver extension method for click
+        for _ in 0..<count {
+            try await cgEventDriver.click(at: screenPoint, button: button)
+            if count > 1 {
+                try await Task.sleep(nanoseconds: 100_000_000) // 100ms between clicks
+            }
+        }
+        
+        return ActionResult(
+            success: true,
+            timestamp: Date(),
+            screenCoordinates: screenPoint
+        )
     }
     
-    public func type(
-        text: String,
-        into window: WindowID,
-        policy: Policy = .STAY_HIDDEN,
-        route: Route? = nil
-    ) async throws -> ActionResult {
-        let command = TypeCommand(
-            text: text,
-            window: window,
-            policy: policy,
-            route: route
-        )
+    /// Type text to currently focused application
+    public func type(text: String) async throws -> ActionResult {
+        print("⌨️ AppPilot: Type text '\(text)'")
         
-        return try await executeCommand(command)
+        guard AXIsProcessTrusted() else {
+            throw PilotError.permissionDenied("Accessibility permission required for CGEvent automation")
+        }
+        
+        guard !text.isEmpty else {
+            throw PilotError.invalidArgument("Text cannot be empty")
+        }
+        
+        try await cgEventDriver.type(text)
+        
+        return ActionResult(
+            success: true,
+            timestamp: Date(),
+            screenCoordinates: nil
+        )
     }
     
-    public func gesture(
-        window: WindowID,
-        _ gesture: Gesture,
-        policy: Policy = .UNMINIMIZE(),
-        durationMs: Int = 150
+    /// Perform drag from point to point
+    public func drag(
+        from startPoint: Point,
+        to endPoint: Point,
+        duration: TimeInterval = 1.0,
+        button: MouseButton = .left
     ) async throws -> ActionResult {
-        let command = GestureCommand(
-            window: window,
-            gesture: gesture,
-            policy: policy,
-            durationMs: durationMs
-        )
+        print("👆 AppPilot: Drag from (\(startPoint.x), \(startPoint.y)) to (\(endPoint.x), \(endPoint.y))")
         
-        return try await executeCommand(command)
+        guard AXIsProcessTrusted() else {
+            throw PilotError.permissionDenied("Accessibility permission required for CGEvent automation")
+        }
+        
+        guard duration > 0 else {
+            throw PilotError.invalidArgument("Duration must be positive")
+        }
+        
+        try await cgEventDriver.drag(from: startPoint, to: endPoint, duration: duration, button: button)
+        
+        return ActionResult(
+            success: true,
+            timestamp: Date(),
+            screenCoordinates: endPoint
+        )
     }
     
-    public func performAX(
-        window: WindowID,
-        path: AXPath,
-        action: AXAction
+    /// Pinch gesture (zoom in/out)
+    public func pinch(
+        center: Point,
+        scale: Double,
+        duration: TimeInterval = 0.5
     ) async throws -> ActionResult {
-        let command = AXCommand(
-            window: window,
-            path: path,
-            action: action
-        )
+        print("🤏 AppPilot: Pinch at (\(center.x), \(center.y)) scale=\(scale)")
         
-        return try await executeCommand(command)
+        guard AXIsProcessTrusted() else {
+            throw PilotError.permissionDenied("Accessibility permission required for CGEvent automation")
+        }
+        
+        guard scale > 0 else {
+            throw PilotError.invalidArgument("Scale must be positive")
+        }
+        
+        // Simulate pinch with scroll + modifier keys
+        try await cgEventDriver.moveCursor(to: center)
+        try await cgEventDriver.keyDown(code: ModifierKey.control.keyCode)
+        let deltaY = scale > 1.0 ? 10.0 : -10.0
+        try await cgEventDriver.scroll(deltaX: 0, deltaY: deltaY, at: center)
+        try await cgEventDriver.keyUp(code: ModifierKey.control.keyCode)
+        
+        return ActionResult(
+            success: true,
+            timestamp: Date(),
+            screenCoordinates: center
+        )
     }
     
-    public func sendAppleEvent(
-        app: AppID,
-        spec: AppleEventSpec
+    /// Rotation gesture
+    public func rotate(
+        center: Point,
+        degrees: Double,
+        duration: TimeInterval = 0.5
     ) async throws -> ActionResult {
-        let command = AppleEventCommand(
-            app: app,
-            spec: spec
-        )
+        print("🔄 AppPilot: Rotate at (\(center.x), \(center.y)) by \(degrees)°")
         
-        return try await executeCommand(command)
+        guard AXIsProcessTrusted() else {
+            throw PilotError.permissionDenied("Accessibility permission required for CGEvent automation")
+        }
+        
+        // Simulate rotation with circular movement
+        let radius: Double = 50.0
+        let steps = max(20, Int(duration * 30))
+        let angleStep = (degrees * .pi / 180) / Double(steps)
+        
+        for i in 0..<steps {
+            let angle = angleStep * Double(i)
+            let x = center.x + radius * cos(angle)
+            let y = center.y + radius * sin(angle)
+            try await cgEventDriver.moveCursor(to: Point(x: x, y: y))
+            try await Task.sleep(nanoseconds: UInt64(duration * 1_000_000_000 / Double(steps)))
+        }
+        
+        return ActionResult(
+            success: true,
+            timestamp: Date(),
+            screenCoordinates: center
+        )
     }
     
+    /// Swipe gesture
+    public func swipe(
+        from startPoint: Point,
+        direction: SwipeDirection,
+        distance: Double = 100,
+        duration: TimeInterval = 0.3
+    ) async throws -> ActionResult {
+        print("👋 AppPilot: Swipe from (\(startPoint.x), \(startPoint.y)) \(direction)")
+        
+        guard AXIsProcessTrusted() else {
+            throw PilotError.permissionDenied("Accessibility permission required for CGEvent automation")
+        }
+        
+        guard distance > 0 else {
+            throw PilotError.invalidArgument("Distance must be positive")
+        }
+        
+        try await cgEventDriver.swipe(from: startPoint, direction: direction, distance: distance, duration: duration)
+        
+        let vector = direction.vector
+        let endPoint = Point(
+            x: startPoint.x + vector.x * distance,
+            y: startPoint.y + vector.y * distance
+        )
+        
+        return ActionResult(
+            success: true,
+            timestamp: Date(),
+            screenCoordinates: endPoint
+        )
+    }
+    
+    /// Scroll at specific point
+    public func scroll(
+        at point: Point,
+        deltaX: Double = 0,
+        deltaY: Double = 0
+    ) async throws -> ActionResult {
+        print("📜 AppPilot: Scroll at (\(point.x), \(point.y))")
+        
+        guard AXIsProcessTrusted() else {
+            throw PilotError.permissionDenied("Accessibility permission required for CGEvent automation")
+        }
+        
+        try await cgEventDriver.scroll(deltaX: deltaX, deltaY: deltaY, at: point)
+        
+        return ActionResult(
+            success: true,
+            timestamp: Date(),
+            screenCoordinates: point
+        )
+    }
+    
+    /// Double-tap then drag (common in map applications)
+    public func doubleTapAndDrag(
+        tapPoint: Point,
+        dragTo endPoint: Point,
+        duration: TimeInterval = 1.0
+    ) async throws -> ActionResult {
+        print("🖱️➕👆 AppPilot: Double-tap and drag")
+        
+        guard AXIsProcessTrusted() else {
+            throw PilotError.permissionDenied("Accessibility permission required for CGEvent automation")
+        }
+        
+        // Implement double-tap and drag using extension methods
+        try await cgEventDriver.doubleClick(at: tapPoint)
+        try await Task.sleep(nanoseconds: 100_000_000) // 100ms pause
+        try await cgEventDriver.drag(from: tapPoint, to: endPoint, duration: duration)
+        
+        return ActionResult(
+            success: true,
+            timestamp: Date(),
+            screenCoordinates: endPoint
+        )
+    }
+    
+    /// Key press with modifiers
+    public func keyPress(
+        key: VirtualKey,
+        modifiers: [ModifierKey] = [],
+        duration: TimeInterval = 0.1
+    ) async throws -> ActionResult {
+        print("⌨️ AppPilot: Key press \(key)")
+        
+        guard AXIsProcessTrusted() else {
+            throw PilotError.permissionDenied("Accessibility permission required for CGEvent automation")
+        }
+        
+        try await cgEventDriver.keyPress(key, modifiers: modifiers, hold: duration)
+        
+        return ActionResult(
+            success: true,
+            timestamp: Date(),
+            screenCoordinates: nil
+        )
+    }
+    
+    /// Key combination (e.g., Cmd+C)
+    public func keyCombination(
+        _ keys: [VirtualKey],
+        modifiers: [ModifierKey]
+    ) async throws -> ActionResult {
+        print("⌨️ AppPilot: Key combination")
+        
+        guard AXIsProcessTrusted() else {
+            throw PilotError.permissionDenied("Accessibility permission required for CGEvent automation")
+        }
+        
+        try await cgEventDriver.keyCombination(keys, modifiers: modifiers)
+        
+        return ActionResult(
+            success: true,
+            timestamp: Date(),
+            screenCoordinates: nil
+        )
+    }
+    
+    /// Wait for condition
     public func wait(_ spec: WaitSpec) async throws {
         switch spec {
-        case .time(let ms):
-            try await Task.sleep(nanoseconds: UInt64(ms) * 1_000_000)
+        case .time(let seconds):
+            print("⏰ AppPilot: Wait for \(seconds) seconds")
+            guard seconds > 0 else {
+                throw PilotError.invalidArgument("Wait time must be positive")
+            }
+            try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
             
-        case .ui_change(let window, let timeoutMs):
-            let stream = await subscribeAX(window: window, mask: .all)
-            let deadline = Date().addingTimeInterval(Double(timeoutMs) / 1000.0)
-            
-            for await _ in stream {
-                if Date() > deadline {
-                    throw PilotError.TIMEOUT(ms: timeoutMs)
-                }
-                // Got a UI change event
-                break
-            }
+        case .uiChange(let window, let timeout):
+            print("👀 AppPilot: Wait for UI change in window \(window.id) (timeout: \(timeout)s)")
+            // TODO: Implement real AX event monitoring for UI changes
+            // This is a placeholder implementation for development
+            try await Task.sleep(nanoseconds: UInt64(min(timeout, 0.1) * 1_000_000_000))
         }
     }
     
-    // MARK: - Private Methods
+    // MARK: - Private Helper Methods
     
-    private func executeCommand(_ command: Command) async throws -> ActionResult {
-        // Determine window and app for the command
-        let (window, app) = extractTargets(from: command)
-        
-        // Check if route is explicitly specified
-        let explicitRoute = extractExplicitRoute(from: command)
-        
-        // Select route
-        let route: Route
-        if let explicitRoute = explicitRoute {
-            route = explicitRoute
-        } else {
-            route = await commandRouter.selectRoute(for: command, app: app, window: window)
+    private func getBundleIdentifier(for pid: pid_t) -> String? {
+        let runningApp = NSRunningApplication(processIdentifier: pid)
+        return runningApp?.bundleIdentifier
+    }
+    
+    private func isApplicationActive(pid: pid_t) -> Bool {
+        let runningApp = NSRunningApplication(processIdentifier: pid)
+        return runningApp?.isActive ?? false
+    }
+    
+    private func isWindowMinimized(windowID: CGWindowID) -> Bool {
+        // This is a simplified check
+        // In a real implementation, you would use more sophisticated detection
+        guard let windowList = CGWindowListCopyWindowInfo([.optionIncludingWindow], windowID) as? [[String: Any]],
+              let windowInfo = windowList.first else {
+            return false
         }
         
-        // Prepare visibility if needed
-        if route == .UI_EVENT {
-            if let window = window, let policy = extractPolicy(from: command) {
-                try await visibilityManager.prepareWindow(window, policy: policy)
-            }
+        // Check if window is on screen (simplified logic)
+        if let onScreen = windowInfo[kCGWindowIsOnscreen as String] as? Bool {
+            return !onScreen
         }
         
-        // Execute - with or without fallback based on route specification
-        if explicitRoute != nil {
-            // Route explicitly specified - don't use fallback
-            return try await commandRouter.execute(command, with: route)
-        } else {
-            // Route auto-selected - use fallback on failure
-            do {
-                return try await commandRouter.execute(command, with: route)
-            } catch {
-                // Try fallback routes
-                let fallbackRoutes = getFallbackRoutes(for: route)
-                
-                for fallbackRoute in fallbackRoutes {
-                    do {
-                        if fallbackRoute == .UI_EVENT, let window = window, let policy = extractPolicy(from: command) {
-                            try await visibilityManager.prepareWindow(window, policy: policy)
-                        }
-                        return try await commandRouter.execute(command, with: fallbackRoute)
-                    } catch {
-                        continue
-                    }
-                }
-                
-                throw PilotError.ROUTE_UNAVAILABLE("All routes failed: \(error)")
-            }
-        }
-    }
-    
-    private func extractTargets(from command: Command) -> (window: WindowID?, app: AppID?) {
-        switch command {
-        case let cmd as ClickCommand:
-            return (cmd.window, nil)
-        case let cmd as TypeCommand:
-            return (cmd.window, nil)
-        case let cmd as GestureCommand:
-            return (cmd.window, nil)
-        case let cmd as AXCommand:
-            return (cmd.window, nil)
-        case let cmd as AppleEventCommand:
-            return (nil, cmd.app)
-        default:
-            return (nil, nil)
-        }
-    }
-    
-    private func extractPolicy(from command: Command) -> Policy? {
-        switch command {
-        case let cmd as ClickCommand:
-            return cmd.policy
-        case let cmd as TypeCommand:
-            return cmd.policy
-        case let cmd as GestureCommand:
-            return cmd.policy
-        default:
-            return nil
-        }
-    }
-    
-    private func extractExplicitRoute(from command: Command) -> Route? {
-        switch command {
-        case let cmd as ClickCommand:
-            return cmd.route
-        case let cmd as TypeCommand:
-            return cmd.route
-        case _ as GestureCommand:
-            return nil // Gestures always use UI_EVENT
-        default:
-            return nil
-        }
-    }
-    
-    private func getFallbackRoutes(for route: Route) -> [Route] {
-        switch route {
-        case .APPLE_EVENT:
-            return [.AX_ACTION, .UI_EVENT]
-        case .AX_ACTION:
-            return [.UI_EVENT]
-        case .UI_EVENT:
-            return []
-        }
+        return false
     }
 }

@@ -1,54 +1,42 @@
 import Foundation
 
 public enum PilotError: Error, Sendable {
-    case PERMISSION_DENIED(PermissionKind)
-    case NOT_FOUND(EntityKind, String?)
-    case ROUTE_UNAVAILABLE(String)
-    case VISIBILITY_REQUIRED(String)
-    case USER_INTERRUPTED
-    case STREAM_OVERFLOW
-    case OS_FAILURE(api: String, status: Int32)
-    case INVALID_ARG(String)
-    case TIMEOUT(ms: Int)
-}
-
-public enum PermissionKind: String, Sendable {
-    case accessibility = "Accessibility"
-    case screenRecording = "Screen Recording"
-    case appleEvents = "Apple Events"
-}
-
-public enum EntityKind: String, Sendable {
-    case application = "Application"
-    case window = "Window"
-    case axElement = "AX Element"
+    case permissionDenied(String)
+    case windowNotFound(WindowID)
+    case applicationNotFound(AppID)
+    case eventCreationFailed
+    case coordinateOutOfBounds(Point)
+    case timeout(TimeInterval)
+    case osFailure(api: String, code: Int32)
+    case streamOverflow
+    case userInterrupted
+    case invalidArgument(String)
 }
 
 extension PilotError: LocalizedError {
     public var errorDescription: String? {
         switch self {
-        case .PERMISSION_DENIED(let kind):
-            return "Permission denied: \(kind.rawValue) permission required"
-        case .NOT_FOUND(let entity, let details):
-            if let details = details {
-                return "\(entity.rawValue) not found: \(details)"
-            } else {
-                return "\(entity.rawValue) not found"
-            }
-        case .ROUTE_UNAVAILABLE(let reason):
-            return "All command routes unavailable: \(reason)"
-        case .VISIBILITY_REQUIRED(let reason):
-            return "Window visibility required: \(reason)"
-        case .USER_INTERRUPTED:
-            return "Operation interrupted by user activity"
-        case .STREAM_OVERFLOW:
+        case .permissionDenied(let description):
+            return "Permission denied: \(description)"
+        case .windowNotFound(let windowID):
+            return "Window not found: ID \(windowID.id)"
+        case .applicationNotFound(let appID):
+            return "Application not found: PID \(appID.pid)"
+        case .eventCreationFailed:
+            return "Failed to create CGEvent"
+        case .coordinateOutOfBounds(let point):
+            return "Coordinates out of bounds: (\(point.x), \(point.y))"
+        case .timeout(let seconds):
+            return "Operation timed out after \(seconds) seconds"
+        case .osFailure(let api, let code):
+            return "OS API failure: \(api) returned error code \(code)"
+        case .streamOverflow:
             return "Event stream buffer overflow"
-        case .OS_FAILURE(let api, let status):
-            return "OS API failure: \(api) returned \(status)"
-        case .INVALID_ARG(let message):
+        case .userInterrupted:
+            return "Operation interrupted by user activity"
+        case .invalidArgument(let message):
             return "Invalid argument: \(message)"
-        case .TIMEOUT(let ms):
-            return "Operation timed out after \(ms)ms"
         }
     }
 }
+

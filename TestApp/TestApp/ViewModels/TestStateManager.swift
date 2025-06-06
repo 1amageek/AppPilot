@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import AppKit
 
 @MainActor
 @Observable
@@ -8,6 +9,14 @@ class TestStateManager {
     var keyboardTestResults: [KeyboardTestResult] = []
     var waitTestResults: [WaitTestResult] = []
     var currentTestSession: TestSession?
+    
+    private var mouseEventMonitor: Any?
+    private var testAreaFrame: CGRect = .zero
+    private var testAreaWindowFrame: CGRect = .zero
+    private var isMonitoringEnabled: Bool = false
+    
+    // External dependencies for result recording
+    weak var testResultsManager: TestResultsManager?
     
     // MARK: - Data Structures for API
     
@@ -119,6 +128,188 @@ class TestStateManager {
         }
     }
     
+    // MARK: - Mouse Event Monitoring
+    
+    func startMouseEventMonitoring(testAreaFrame: CGRect, windowFrame: CGRect) {
+        print("🖱️ Starting mouse event monitoring...")
+        self.testAreaFrame = testAreaFrame
+        self.testAreaWindowFrame = windowFrame
+        self.isMonitoringEnabled = true
+        
+        stopMouseEventMonitoring() // Stop any existing monitor
+        
+        // Monitor mouse clicks using NSEvent
+        mouseEventMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] event in
+            self?.handleGlobalMouseClick(event: event)
+        }
+        
+        print("✅ Mouse event monitoring started")
+        print("   Test area frame: \(testAreaFrame)")
+        print("   Window frame: \(windowFrame)")
+    }
+    
+    func stopMouseEventMonitoring() {
+        if let monitor = mouseEventMonitor {
+            NSEvent.removeMonitor(monitor)
+            mouseEventMonitor = nil
+            isMonitoringEnabled = false
+            print("🛑 Mouse event monitoring stopped")
+        }
+    }
+    
+    private func handleGlobalMouseClick(event: NSEvent) {
+        guard isMonitoringEnabled else { return }
+        
+        let screenLocation = NSEvent.mouseLocation
+        
+        print("🖱️ Global mouse click detected:")
+        print("   Screen location: (\(screenLocation.x), \(screenLocation.y))")
+        print("   Event type: \(event.type.rawValue)")
+        
+        // Convert screen coordinates to test area coordinates
+        if let testAreaLocation = convertScreenToTestArea(screenLocation: screenLocation) {
+            // Create bounds for test area with some tolerance
+            let testAreaBounds = CGRect(
+                x: -10, // Allow slight negative coordinates
+                y: -10,
+                width: 420, // testAreaSize (400) + tolerance
+                height: 420
+            )
+            
+            print("   Test area bounds: \(testAreaBounds)")
+            print("   Click in bounds: \(testAreaBounds.contains(testAreaLocation))")
+            
+            // Check if click is within our test area (with tolerance)
+            if testAreaBounds.contains(testAreaLocation) {
+                print("✅ Click is within test area bounds, processing...")
+                handleExternalClick(at: testAreaLocation, button: getMouseButton(from: event))
+            } else {
+                print("ℹ️ Click is outside test area bounds")
+                print("   Distance from center: \(distanceFromTestAreaCenter(testAreaLocation))")
+            }
+        } else {
+            print("❌ Failed to convert screen coordinates to test area coordinates")
+        }
+    }
+    
+    private func convertScreenToTestArea(screenLocation: CGPoint) -> CGPoint? {
+        // macOS screen coordinates: origin at bottom-left
+        // SwiftUI coordinates: origin at top-left
+        // Need to account for window frame and test area offset
+        
+        // Get screen height for Y coordinate flipping
+        guard let screen = NSScreen.main else { return nil }
+        let screenHeight = screen.frame.height
+        
+        // Convert screen coordinates (bottom-left origin) to window coordinates (top-left origin)
+        let windowX = screenLocation.x - testAreaWindowFrame.minX
+        let windowY = screenHeight - screenLocation.y - testAreaWindowFrame.minY
+        
+        // Convert window coordinates to test area coordinates
+        let testAreaX = windowX - testAreaFrame.minX
+        let testAreaY = windowY - testAreaFrame.minY
+        
+        print("🔄 Coordinate conversion:")
+        print("   Screen: (%.1f, %.1f)", screenLocation.x, screenLocation.y)
+        print("   Screen height: %.1f", screenHeight)
+        print("   Window frame: \(testAreaWindowFrame)")
+        print("   Test area frame: \(testAreaFrame)")
+        print("   Window coords: (%.1f, %.1f)", windowX, windowY)
+        print("   Test area coords: (%.1f, %.1f)", testAreaX, testAreaY)
+        
+        return CGPoint(x: testAreaX, y: testAreaY)
+    }
+    
+    private func distanceFromTestAreaCenter(_ point: CGPoint) -> Double {
+        let centerX = 200.0 // testAreaSize / 2
+        let centerY = 200.0
+        let deltaX = point.x - centerX
+        let deltaY = point.y - centerY
+        return sqrt(deltaX * deltaX + deltaY * deltaY)
+    }
+    
+    private func getMouseButton(from event: NSEvent) -> MouseButton {
+        switch event.type {
+        case .leftMouseDown:
+            return .left
+        case .rightMouseDown:
+            return .right
+        case .otherMouseDown:
+            return .center
+        default:
+            return .left
+        }
+    }
+    
+    private func handleExternalClick(at location: CGPoint, button: MouseButton) {
+        print("🎯 Processing external click at (\(location.x), \(location.y)) with \(button.rawValue) button")
+        
+        // List all targets and their distances for debugging
+        print("📍 Available targets:")
+        for target in clickTargets {
+            let distance = sqrt(pow(target.position.x - location.x, 2) + pow(target.position.y - location.y, 2))
+            print("   \(target.id) (\(target.label)): (\(target.position.x), \(target.position.y)) - distance: \(String(format: "%.1f", distance))")
+        }
+        
+        // Check if click hits any target with multiple tolerance levels
+        let tolerances: [CGFloat] = [25.0, 50.0, 75.0, 100.0]
+        var foundTarget: ClickTargetState?
+        var usedTolerance: CGFloat = 0
+        
+        for tolerance in tolerances {
+            if let target = getClickTarget(near: location, tolerance: tolerance) {
+                foundTarget = target
+                usedTolerance = tolerance
+                break
+            }
+        }
+        
+        if let target = foundTarget {
+            print("✅ External click hit target: \(target.id) with tolerance \(usedTolerance)")
+            markTargetClicked(id: target.id)
+            
+            // Record successful external click if TestResultsManager is available
+            Task { @MainActor in
+                if let resultsManager = testResultsManager {
+                    let result = TestResult(
+                        testType: .mouseClick,
+                        success: true,
+                        details: "External click hit \(target.label) target with \(button.rawValue.lowercased()) button (tolerance: \(usedTolerance))",
+                        coordinates: location
+                    )
+                    resultsManager.addResult(result)
+                    print("📝 Recorded successful external click result")
+                }
+            }
+        } else {
+            print("❌ External click missed all targets (tried tolerances: \(tolerances))")
+            
+            // Show closest target for debugging
+            if let closestTarget = clickTargets.min(by: { target1, target2 in
+                let dist1 = sqrt(pow(target1.position.x - location.x, 2) + pow(target1.position.y - location.y, 2))
+                let dist2 = sqrt(pow(target2.position.x - location.x, 2) + pow(target2.position.y - location.y, 2))
+                return dist1 < dist2
+            }) {
+                let closestDistance = sqrt(pow(closestTarget.position.x - location.x, 2) + pow(closestTarget.position.y - location.y, 2))
+                print("   Closest target: \(closestTarget.id) at distance \(String(format: "%.1f", closestDistance))")
+            }
+            
+            // Record missed external click
+            Task { @MainActor in
+                if let resultsManager = testResultsManager {
+                    let result = TestResult(
+                        testType: .mouseClick,
+                        success: false,
+                        details: "External click missed all targets with \(button.rawValue.lowercased()) button",
+                        coordinates: location
+                    )
+                    resultsManager.addResult(result)
+                    print("📝 Recorded missed external click result")
+                }
+            }
+        }
+    }
+    
     // MARK: - Session Management
     
     func startTestSession() {
@@ -130,6 +321,7 @@ class TestStateManager {
     
     func endTestSession() {
         print("🎬 Ending test session...")
+        stopMouseEventMonitoring() // Stop monitoring when session ends
         currentTestSession?.endTime = Date()
         if let session = currentTestSession {
             print("✅ Test session ended:")

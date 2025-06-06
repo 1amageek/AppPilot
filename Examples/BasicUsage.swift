@@ -1,77 +1,83 @@
 import Foundation
 import AppPilot
 
-// Example: Basic AppPilot Usage
+// MARK: - AppPilot v2.0 Basic Usage Example
+
 @main
 struct BasicUsageExample {
-    static func main() async throws {
-        let pilot = AppPilot()
-        
-        print("AppPilot SDK Example")
-        print("===================")
+    static func main() async {
+        print("🚀 AppPilot v2.0 - Basic Usage Example")
         
         do {
-            // List all running applications
-            print("\n1. Listing applications...")
+            // Initialize AppPilot with default drivers
+            let pilot = AppPilot()
+            
+            // 1. List all running applications
+            print("\n📱 Listing applications...")
             let apps = try await pilot.listApplications()
-            print("Found \(apps.count) applications")
-            
-            for app in apps.prefix(3) {
+            print("Found \(apps.count) applications:")
+            for app in apps.prefix(5) {
                 print("  - \(app.name) (PID: \(app.id.pid))")
-                
-                // List windows for this app
-                let windows = try await pilot.listWindows(in: app.id)
-                print("    Windows: \(windows.count)")
-                
-                for window in windows.prefix(2) {
-                    print("      * \(window.title ?? "Untitled") - Minimized: \(window.isMinimized)")
-                }
             }
             
-            // Example: Click operation (would require actual window)
-            /*
-            if let firstApp = apps.first,
-               let windows = try? await pilot.listWindows(in: firstApp.id),
-               let firstWindow = windows.first {
-                
-                print("\n2. Performing click operation...")
-                let result = try await pilot.click(
-                    window: firstWindow.id,
-                    at: Point(x: 100, y: 100),
-                    policy: .STAY_HIDDEN  // Click without bringing window to front
-                )
-                
-                print("Click result: \(result.success) via \(result.route)")
+            // 2. Find a target application (e.g., Finder)
+            guard let finderApp = apps.first(where: { $0.name.contains("Finder") || $0.name.contains("System") }) else {
+                print("❌ Could not find Finder or System app")
+                return
             }
-            */
             
-            // Example: Type text (would require actual window)
-            /*
-            print("\n3. Typing text...")
-            let typeResult = try await pilot.type(
-                text: "Hello from AppPilot!",
-                into: windowID,
-                policy: .STAY_HIDDEN
-            )
+            print("\n🎯 Target app: \(finderApp.name)")
             
-            print("Type result: \(typeResult.success) via \(typeResult.route)")
-            */
-            
-            // Example: Subscribe to UI changes
-            /*
-            print("\n4. Monitoring UI changes...")
-            let stream = await pilot.subscribeAX(window: windowID, mask: .all)
-            
-            for await event in stream {
-                print("UI Event: \(event.type) at \(event.timestamp)")
-                break // Just show one event for demo
+            // 3. List windows for the target application
+            print("\n🪟 Listing windows for \(finderApp.name)...")
+            let windows = try await pilot.listWindows(app: finderApp.id)
+            print("Found \(windows.count) windows:")
+            for window in windows {
+                print("  - \(window.title ?? "Untitled") (\(window.bounds))")
             }
-            */
             
-            print("\nExample completed successfully!")
+            // 4. Get window bounds for coordinate conversion
+            if let firstWindow = windows.first {
+                print("\n📐 Getting window bounds...")
+                let bounds = try await pilot.getWindowBounds(window: firstWindow.id)
+                print("Window bounds: \(bounds)")
+                
+                // 5. Convert window-relative coordinates to screen coordinates
+                let windowRelativePoint = Point(x: 50.0, y: 50.0)
+                let screenPoint = try await pilot.windowToScreen(point: windowRelativePoint, window: firstWindow.id)
+                print("Window point \(windowRelativePoint) → Screen point \(screenPoint)")
+                
+                // 6. Simulate a click (this would actually move the cursor!)
+                print("\n🖱️ Simulating click at screen coordinates...")
+                print("⚠️ This would actually click at (\(screenPoint.x), \(screenPoint.y))")
+                // Uncomment the next line to actually perform the click:
+                // let result = try await pilot.click(at: screenPoint)
+                // print("Click result: \(result)")
+            }
+            
+            // 7. Simulate typing (this would actually type!)
+            print("\n⌨️ Simulating typing...")
+            print("⚠️ This would actually type 'Hello AppPilot v2.0!'")
+            // Uncomment the next line to actually type:
+            // let typeResult = try await pilot.type(text: "Hello AppPilot v2.0!")
+            // print("Type result: \(typeResult)")
+            
+            // 8. Wait example
+            print("\n⏰ Waiting for 1 second...")
+            try await pilot.wait(.time(seconds: 1.0))
+            print("Wait completed!")
+            
+            // 9. Capture window screenshot
+            if let firstWindow = windows.first {
+                print("\n📷 Capturing window screenshot...")
+                let image = try await pilot.capture(window: firstWindow.id)
+                print("Screenshot captured: \(image.width)x\(image.height) pixels")
+            }
+            
+            print("\n✅ AppPilot v2.0 basic usage example completed!")
             
         } catch {
-            print("Error: \(error)")
+            print("❌ Error: \(error)")
         }
     }
 }
