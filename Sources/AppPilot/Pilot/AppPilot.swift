@@ -20,55 +20,98 @@ public actor AppPilot {
     // MARK: - Application Management
     
     /// Get all running applications
+    /// 
+    /// Returns a list of all currently running applications that can be automated.
+    /// Only applications with regular activation policy are included.
+    /// 
+    /// - Returns: An array of `AppInfo` objects representing available applications
+    /// - Throws: `PilotError.permissionDenied` if accessibility permission is not granted
     public func listApplications() async throws -> [AppInfo] {
-        print("📱 AppPilot: Listing applications")
         return try await accessibilityDriver.getApplications()
     }
     
     /// Find application by bundle ID
+    /// 
+    /// Locates a running application using its bundle identifier.
+    /// 
+    /// - Parameter bundleId: The bundle identifier of the application (e.g., "com.apple.finder")
+    /// - Returns: An `AppHandle` for the found application
+    /// - Throws: `PilotError.applicationNotFound` if no application with the specified bundle ID is running
     public func findApplication(bundleId: String) async throws -> AppHandle {
-        print("🔍 AppPilot: Finding application with bundle ID: \(bundleId)")
         return try await accessibilityDriver.findApplication(bundleId: bundleId)
     }
     
     /// Find application by name
+    /// 
+    /// Locates a running application using its display name.
+    /// Uses case-insensitive partial matching.
+    /// 
+    /// - Parameter name: The name of the application (e.g., "Finder", "Safari")
+    /// - Returns: An `AppHandle` for the found application
+    /// - Throws: `PilotError.applicationNotFound` if no application with the specified name is running
     public func findApplication(name: String) async throws -> AppHandle {
-        print("🔍 AppPilot: Finding application with name: \(name)")
         return try await accessibilityDriver.findApplication(name: name)
     }
     
     /// Get windows for an application
+    /// 
+    /// Retrieves all windows belonging to the specified application.
+    /// 
+    /// - Parameter app: The application handle to get windows for
+    /// - Returns: An array of `WindowInfo` objects representing the application's windows
+    /// - Throws: `PilotError.applicationNotFound` if the application handle is invalid
     public func listWindows(app: AppHandle) async throws -> [WindowInfo] {
-        print("🪟 AppPilot: Listing windows for app: \(app.id)")
         return try await accessibilityDriver.getWindows(for: app)
     }
     
     /// Find window by title
+    /// 
+    /// Locates a window by its title within the specified application.
+    /// Uses case-insensitive partial matching.
+    /// 
+    /// - Parameters:
+    ///   - app: The application handle to search within
+    ///   - title: The window title to search for
+    /// - Returns: A `WindowHandle` for the found window
+    /// - Throws: `PilotError.windowNotFound` if no window with the specified title exists
     public func findWindow(app: AppHandle, title: String) async throws -> WindowHandle {
-        print("🔍 AppPilot: Finding window with title: \(title)")
         return try await accessibilityDriver.findWindow(app: app, title: title)
     }
     
     /// Find window by index
+    /// 
+    /// Locates a window by its index position within the specified application.
+    /// Index 0 refers to the first window.
+    /// 
+    /// - Parameters:
+    ///   - app: The application handle to search within
+    ///   - index: The zero-based index of the window
+    /// - Returns: A `WindowHandle` for the window at the specified index
+    /// - Throws: `PilotError.windowNotFound` if the index is out of bounds
     public func findWindow(app: AppHandle, index: Int) async throws -> WindowHandle {
-        print("🔍 AppPilot: Finding window at index: \(index)")
         return try await accessibilityDriver.findWindow(app: app, index: index)
     }
     
     // MARK: - UI Element Discovery
     
     /// Find UI elements by criteria
+    /// 
+    /// Searches for UI elements within a window using optional filtering criteria.
+    /// Elements are discovered using the Accessibility API and can be filtered by role, title, or identifier.
+    /// 
+    /// - Parameters:
+    ///   - window: The window to search within
+    ///   - role: Optional element role filter (e.g., `.button`, `.textField`)
+    ///   - title: Optional title filter (case-insensitive partial match)
+    ///   - identifier: Optional accessibility identifier filter (exact match)
+    /// - Returns: An array of `UIElement` objects matching the criteria
+    /// - Throws: `PilotError.windowNotFound` if the window is invalid or `PilotError.permissionDenied` if accessibility permission is not granted
     public func findElements(
         in window: WindowHandle,
         role: ElementRole? = nil,
         title: String? = nil,
         identifier: String? = nil
     ) async throws -> [UIElement] {
-        print("🎯 AppPilot: Finding elements in window: \(window.id)")
-        print("   Role: \(role?.rawValue ?? "any")")
-        print("   Title: \(title ?? "any")")
-        print("   Identifier: \(identifier ?? "any")")
-        
         let elements = try await accessibilityDriver.findElements(
             in: window,
             role: role,
@@ -76,44 +119,66 @@ public actor AppPilot {
             identifier: identifier
         )
         
-        print("✅ AppPilot: Found \(elements.count) elements")
         return elements
     }
     
     /// Find specific UI element
+    /// 
+    /// Locates a single UI element by role and title. This method expects exactly one matching element.
+    /// 
+    /// - Parameters:
+    ///   - window: The window to search within
+    ///   - role: The element role to search for
+    ///   - title: The element title to search for (case-insensitive partial match)
+    /// - Returns: The matching `UIElement`
+    /// - Throws: 
+    ///   - `PilotError.elementNotFound` if no element matches the criteria
+    ///   - `PilotError.multipleElementsFound` if multiple elements match
+    ///   - `PilotError.windowNotFound` if the window is invalid
     public func findElement(
         in window: WindowHandle,
         role: ElementRole,
         title: String
     ) async throws -> UIElement {
-        print("🎯 AppPilot: Finding element \(role.rawValue) with title: \(title)")
-        
         let element = try await accessibilityDriver.findElement(
             in: window,
             role: role,
             title: title
         )
         
-        print("✅ AppPilot: Found element: \(element.id)")
         return element
     }
     
     /// Find button by title
+    /// 
+    /// Convenience method to locate a button element by its title.
+    /// 
+    /// - Parameters:
+    ///   - window: The window to search within
+    ///   - title: The button title to search for
+    /// - Returns: The matching button `UIElement`
+    /// - Throws: Same errors as `findElement(in:role:title:)`
     public func findButton(
         in window: WindowHandle,
         title: String
     ) async throws -> UIElement {
-        print("🔘 AppPilot: Finding button with title: \(title)")
         return try await findElement(in: window, role: .button, title: title)
     }
     
     /// Find text field
+    /// 
+    /// Locates a text input field, optionally by placeholder text.
+    /// If no placeholder is specified, returns the first available text field or search field.
+    /// 
+    /// - Parameters:
+    ///   - window: The window to search within
+    ///   - placeholder: Optional placeholder text to search for
+    /// - Returns: The matching text field `UIElement`
+    /// - Throws: `PilotError.elementNotFound` if no text field is found
     public func findTextField(
         in window: WindowHandle,
         placeholder: String? = nil
     ) async throws -> UIElement {
-        print("📝 AppPilot: Finding text field")
-        
         // Try to find by placeholder first, then any text field
         if let placeholder = placeholder {
             do {
@@ -183,7 +248,6 @@ public actor AppPilot {
         
         // Note: Element-based operations cannot ensure app focus without window context
         // For safer operations, use typeIntoElement(_:text:in:)
-        print("   ⚠️ Warning: Cannot ensure target app focus for element-only operation")
         
         // Click the element first to focus it
         let _ = try await click(element: element)
@@ -202,12 +266,25 @@ public actor AppPilot {
     }
     
     /// Get value from UI element
+    /// 
+    /// Retrieves the current value of a UI element, such as text from a text field
+    /// or the state of a checkbox.
+    /// 
+    /// - Parameter element: The UI element to get the value from
+    /// - Returns: The element's value as a string, or `nil` if no value is available
+    /// - Throws: `PilotError.elementNotAccessible` if the element is no longer available
     public func getValue(from element: UIElement) async throws -> String? {
-        print("📖 AppPilot: Getting value from element: \(element.id)")
         return try await accessibilityDriver.getValue(from: element)
     }
     
     /// Check if element exists and is valid
+    /// 
+    /// Verifies that a UI element is still available and accessible in the interface.
+    /// Elements may become invalid if the UI changes or windows are closed.
+    /// 
+    /// - Parameter element: The UI element to check
+    /// - Returns: `true` if the element exists and is accessible, `false` otherwise
+    /// - Throws: Accessibility-related errors if permission is denied
     public func elementExists(_ element: UIElement) async throws -> Bool {
         return try await accessibilityDriver.elementExists(element)
     }
@@ -215,19 +292,30 @@ public actor AppPilot {
     // MARK: - Wait Operations
     
     /// Wait for element to appear
+    /// 
+    /// Polls for a UI element to become available within the specified timeout period.
+    /// This is useful when waiting for UI changes, such as loading indicators to appear
+    /// or dialog boxes to be shown.
+    /// 
+    /// The method checks for the element every 0.5 seconds until it appears or the timeout is reached.
+    /// 
+    /// - Parameters:
+    ///   - window: The window to search for the element in
+    ///   - role: The accessibility role of the element to wait for
+    ///   - title: The title/label of the element to wait for
+    ///   - timeout: Maximum time to wait in seconds (default: 10.0)
+    /// - Returns: The UI element once it appears
+    /// - Throws: `PilotError.timeout` if the element doesn't appear within the timeout period
     public func waitForElement(
         in window: WindowHandle,
         role: ElementRole,
         title: String,
         timeout: TimeInterval = 10.0
     ) async throws -> UIElement {
-        print("⏰ AppPilot: Waiting for element \(role.rawValue) with title: \(title)")
-        
         let startTime = Date()
         while Date().timeIntervalSince(startTime) < timeout {
             do {
                 let element = try await findElement(in: window, role: role, title: title)
-                print("✅ AppPilot: Element appeared after \(String(format: "%.1f", Date().timeIntervalSince(startTime)))s")
                 return element
             } catch PilotError.elementNotFound {
                 // Element not found yet, wait and retry
@@ -239,17 +327,34 @@ public actor AppPilot {
     }
     
     /// Wait for condition
+    /// 
+    /// Waits for various conditions to be met, such as time delays, element appearance,
+    /// or element disappearance. This is essential for handling asynchronous UI changes
+    /// and ensuring automation scripts wait for the right moments.
+    /// 
+    /// - Parameter spec: The wait specification defining what to wait for
+    /// - Throws: `PilotError.timeout` if the wait condition is not met within the timeout period
+    /// 
+    /// ## Usage Examples
+    /// ```swift
+    /// // Wait for a specific time
+    /// try await pilot.wait(.time(seconds: 2.0))
+    /// 
+    /// // Wait for an element to appear
+    /// try await pilot.wait(.elementAppear(window, .button, "Submit"))
+    /// 
+    /// // Wait for an element to disappear
+    /// try await pilot.wait(.elementDisappear(window, .dialog, "Loading"))
+    /// ```
     public func wait(_ spec: WaitSpec) async throws {
         switch spec {
         case .time(let seconds):
-            print("⏰ AppPilot: Wait for \(seconds) seconds")
             try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
             
         case .elementAppear(let window, let role, let title):
             let _ = try await waitForElement(in: window, role: role, title: title)
             
         case .elementDisappear(let window, let role, let title):
-            print("⏰ AppPilot: Waiting for element to disappear: \(role.rawValue) '\(title)'")
             let startTime = Date()
             let timeout: TimeInterval = 10.0
             
@@ -260,7 +365,6 @@ public actor AppPilot {
                     try await wait(.time(seconds: 0.5))
                 } catch PilotError.elementNotFound {
                     // Element disappeared
-                    print("✅ AppPilot: Element disappeared")
                     return
                 }
             }
@@ -268,7 +372,6 @@ public actor AppPilot {
             throw PilotError.timeout(timeout)
             
         case .uiChange(let window, let timeout):
-            print("⏰ AppPilot: Wait for UI change in window: \(window.id)")
             // Simplified implementation - just wait for time
             try await wait(.time(seconds: min(timeout, 5.0)))
         }
@@ -278,28 +381,20 @@ public actor AppPilot {
     
     /// Ensure target application and window are focused before operations
     private func ensureTargetAppFocus(for window: WindowHandle) async throws {
-        print("🎯 AppPilot: Ensuring target app focus for window: \(window.id)")
-        
         // Get window info to find the associated app
         let apps = try await listApplications()
         var targetApp: AppInfo?
         var windowInfo: WindowInfo?
         
-        print("   Searching through \(apps.count) applications...")
-        
         // Find which app owns this window
         for app in apps {
-            print("   Checking app: \(app.name) (ID: \(app.id.id))")
             do {
                 let windows = try await listWindows(app: app.id)
-                print("     Found \(windows.count) windows for \(app.name)")
                 
                 for win in windows {
-                    print("       Window: \(win.id.id) - '\(win.title ?? "No title")'")
                     if win.id == window {
                         targetApp = app
                         windowInfo = win
-                        print("   ✅ Found window owner: \(app.name) (ID: \(app.id.id))")
                         break
                     }
                 }
@@ -307,54 +402,34 @@ public actor AppPilot {
                 if targetApp != nil { break }
             } catch {
                 // Skip apps that can't be queried (might not have accessibility permission)
-                print("     ⚠️ Skipping app \(app.name): \(error)")
                 continue
             }
         }
         
-        guard let app = targetApp, let windowBounds = windowInfo?.bounds else {
-            print("⚠️ AppPilot: Could not find app for window, proceeding without focus")
+        guard let app = targetApp, let _ = windowInfo?.bounds else {
             return
         }
-        
-        print("   Target app: \(app.name)")
-        print("   Window bounds: \(windowBounds)")
         
         // Find the NSRunningApplication for activation
         let runningApps = NSWorkspace.shared.runningApplications
         guard let nsApp = runningApps.first(where: { 
             $0.bundleIdentifier == app.bundleIdentifier || $0.localizedName == app.name 
         }) else {
-            print("⚠️ AppPilot: Could not find NSRunningApplication, proceeding without focus")
             return
         }
         
         // Check if app is already frontmost
         let currentFrontmost = NSWorkspace.shared.frontmostApplication
         if currentFrontmost?.processIdentifier == nsApp.processIdentifier {
-            print("✅ AppPilot: Target app already focused")
             return
         }
         
         // Activate the target application
-        print("   Activating target application...")
         let activated = nsApp.activate(options: [.activateIgnoringOtherApps])
         
         if activated {
-            print("✅ AppPilot: Target app activated")
-            
             // Wait for activation to complete
             try await wait(.time(seconds: 0.5))
-            
-            // Verify activation
-            let newFrontmost = NSWorkspace.shared.frontmostApplication
-            if newFrontmost?.processIdentifier == nsApp.processIdentifier {
-                print("✅ AppPilot: Target app focus verified")
-            } else {
-                print("⚠️ AppPilot: App activation verification failed, but proceeding")
-            }
-        } else {
-            print("⚠️ AppPilot: Failed to activate target app, proceeding anyway")
         }
     }
     
@@ -368,8 +443,6 @@ public actor AppPilot {
                 if let windowInfo = windows.first(where: { $0.id == window }) {
                     let bounds = windowInfo.bounds
                     
-                    print("   Validating coordinates against window bounds: \(bounds)")
-                    
                     // Check if point is within window bounds (with some tolerance)
                     let tolerance: CGFloat = 50
                     let expandedBounds = CGRect(
@@ -380,10 +453,7 @@ public actor AppPilot {
                     )
                     
                     if !expandedBounds.contains(CGPoint(x: point.x, y: point.y)) {
-                        print("⚠️ AppPilot: Click point (\(point.x), \(point.y)) is outside window bounds \(bounds)")
-                        print("   Proceeding anyway for testing purposes")
-                    } else {
-                        print("✅ AppPilot: Click point is within window bounds")
+                        // Point is outside window bounds, but proceed anyway for testing purposes
                     }
                     return
                 }
@@ -392,22 +462,35 @@ public actor AppPilot {
                 continue
             }
         }
-        
-        print("⚠️ AppPilot: Could not validate coordinates - window not found")
     }
     
     // MARK: - Fallback Coordinate Operations
     
     /// Click at coordinates (fallback when element detection fails)
+    /// 
+    /// Performs a mouse click at the specified coordinates within a window.
+    /// This is a fallback method used when UI element detection fails or when
+    /// precise coordinate-based clicking is required.
+    /// 
+    /// The method automatically ensures the target application is focused before
+    /// performing the click operation.
+    /// 
+    /// - Parameters:
+    ///   - window: The window to click in (used for app focus management)
+    ///   - point: The screen coordinates to click at
+    ///   - button: The mouse button to use (default: `.left`)
+    ///   - count: Number of clicks to perform (default: `1`)
+    /// - Returns: An `ActionResult` indicating success and the coordinates clicked
+    /// - Throws: `PilotError.eventCreationFailed` if the click event cannot be created
+    /// 
+    /// - Important: Prefer element-based clicking with `click(element:)` when possible,
+    ///   as it's more reliable and maintainable.
     public func click(
         window: WindowHandle,
         at point: Point,
         button: MouseButton = .left,
         count: Int = 1
     ) async throws -> ActionResult {
-        print("🖱️ AppPilot: Focused coordinate click at (\(point.x), \(point.y))")
-        print("   Button: \(button), Count: \(count)")
-        
         // Ensure target app is focused before clicking
         try await ensureTargetAppFocus(for: window)
         
@@ -424,13 +507,23 @@ public actor AppPilot {
     }
     
     /// Type text to currently focused application (fallback)
+    /// 
+    /// Types text into the currently focused application without targeting a specific
+    /// window or element. This is a fallback method for backwards compatibility when
+    /// element-based typing is not possible.
+    /// 
+    /// - Parameter text: The text to type
+    /// - Returns: An `ActionResult` indicating success
+    /// - Throws: `PilotError.eventCreationFailed` if keyboard events cannot be created
+    /// 
+    /// - Warning: This method cannot ensure the correct application is focused.
+    ///   Prefer using `type(text:into:)` with a specific UI element when possible.
+    /// 
+    /// - Note: This method types text to whatever application currently has focus,
+    ///   which may not be the intended target.
     public func type(text: String) async throws -> ActionResult {
-        print("⌨️ AppPilot: Fallback text input")
-        print("   Text: \(text.prefix(50))\(text.count > 50 ? "..." : "")")
-        
         // Note: Without window context, we cannot ensure specific app focus
         // This is a fallback method for backwards compatibility
-        print("   ⚠️ Warning: Cannot ensure target app focus without window context")
         
         try await cgEventDriver.type(text: text)
         
@@ -440,27 +533,58 @@ public actor AppPilot {
     // MARK: - Input Source Management
     
     /// Get current input source
+    /// 
+    /// Retrieves information about the currently active input source (keyboard layout).
+    /// This is useful for internationalization and ensuring the correct input method
+    /// is active before typing text.
+    /// 
+    /// - Returns: Information about the current input source including display name and identifier
+    /// - Throws: System-level errors if input source information cannot be retrieved
     public func getCurrentInputSource() async throws -> InputSourceInfo {
-        print("🌐 AppPilot: Getting current input source")
         let source = try await cgEventDriver.getCurrentInputSource()
-        print("   Current: \(source.displayName) (\(source.identifier))")
         return source
     }
     
     /// Get all available input sources
+    /// 
+    /// Retrieves a list of all input sources (keyboard layouts) available on the system.
+    /// This includes different language keyboards, input methods, and layout variants.
+    /// 
+    /// - Returns: An array of `InputSourceInfo` objects representing all available input sources
+    /// - Throws: System-level errors if input source information cannot be retrieved
+    /// 
+    /// ## Usage Example
+    /// ```swift
+    /// let sources = try await pilot.getAvailableInputSources()
+    /// for source in sources {
+    ///     print("\(source.displayName): \(source.identifier)")
+    /// }
+    /// ```
     public func getAvailableInputSources() async throws -> [InputSourceInfo] {
-        print("🌐 AppPilot: Getting available input sources")
         let sources = try await cgEventDriver.getAvailableInputSources()
-        print("   Found \(sources.count) input sources")
-        for source in sources {
-            print("     - \(source.displayName) (\(source.identifier))")
-        }
         return sources
     }
     
     /// Switch to specified input source
+    /// 
+    /// Changes the active input source (keyboard layout) to the specified one.
+    /// This is useful for automation that needs to work with different languages
+    /// or input methods.
+    /// 
+    /// - Parameter source: The input source to switch to
+    /// - Throws: System-level errors if the input source cannot be activated
+    /// 
+    /// ## Usage Example
+    /// ```swift
+    /// // Get available sources
+    /// let sources = try await pilot.getAvailableInputSources()
+    /// 
+    /// // Find Japanese input source
+    /// if let japanese = sources.first(where: { $0.identifier.contains("Japanese") }) {
+    ///     try await pilot.switchInputSource(to: japanese)
+    /// }
+    /// ```
     public func switchInputSource(to source: InputSource) async throws {
-        print("🌐 AppPilot: Switching input source to \(source.displayName)")
         try await cgEventDriver.switchInputSource(to: source)
     }
     

@@ -114,7 +114,7 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
         
         var windows: [WindowInfo] = []
         
-        for (index, axWindow) in axWindows.enumerated() {
+        for (_, axWindow) in axWindows.enumerated() {
             let windowHandle = try await generateWindowHandle(for: axWindow, appHandle: appHandle)
             
             let title = getStringAttribute(from: axWindow, attribute: kAXTitleAttribute)
@@ -162,14 +162,8 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
     
     public func findElements(in windowHandle: WindowHandle, role: ElementRole?, title: String?, identifier: String?) async throws -> [UIElement] {
         
-        print("🔍 AccessibilityDriver: Finding elements in window \(windowHandle.id)")
-        print("   Role: \(role?.rawValue ?? "any")")
-        print("   Title: \(title ?? "any")")
-        print("   Identifier: \(identifier ?? "any")")
-        
         // Check accessibility permission first
         guard await checkPermission() else {
-            print("❌ AccessibilityDriver: No accessibility permission")
             throw PilotError.permissionDenied("Accessibility permission required. Please grant access in System Settings > Privacy & Security > Accessibility")
         }
         
@@ -177,26 +171,15 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
         let cacheKey = "\(windowHandle.id)-\(role?.rawValue ?? "all")-\(title ?? "")-\(identifier ?? "")"
         if let cached = elementCache[cacheKey],
            Date().timeIntervalSince(lastCacheUpdate) < cacheTimeout {
-            print("✅ AccessibilityDriver: Found \(cached.count) elements (cached)")
             return cached
         }
         
         guard let windowData = windowHandles[windowHandle.id] else {
-            print("❌ AccessibilityDriver: Window handle not found: \(windowHandle.id)")
             throw PilotError.windowNotFound(windowHandle)
         }
         
-        print("📋 AccessibilityDriver: Extracting elements from AX tree...")
-        
         // Extract all elements from AX tree
         let allElements = try await extractElementsFromWindow(windowData.axWindow, windowHandle: windowHandle)
-        
-        print("🔍 AccessibilityDriver: Found \(allElements.count) total elements in AX tree")
-        
-        // Debug: Print some example elements
-        for (index, element) in allElements.prefix(5).enumerated() {
-            print("   \(index + 1). \(element.role.rawValue): '\(element.title ?? "No title")' ID: '\(element.identifier ?? "No ID")' bounds: \(element.bounds)")
-        }
         
         // Filter based on criteria
         let filteredElements = allElements.filter { element in
@@ -214,8 +197,6 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
             
             return true
         }
-        
-        print("✅ AccessibilityDriver: Found \(filteredElements.count) elements after filtering")
         
         // Cache the results
         elementCache[cacheKey] = filteredElements
@@ -378,9 +359,6 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
     
     private func extractElementsFromWindow(_ axWindow: AXUIElement, windowHandle: WindowHandle, depth: Int = 0, maxDepth: Int = 10) async throws -> [UIElement] {
         guard depth < maxDepth else { 
-            if depth == 0 {
-                print("⚠️ AccessibilityDriver: Max depth reached at root level")
-            }
             return [] 
         }
         
@@ -389,11 +367,6 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
         // Process current element
         if let element = try? createUIElement(from: axWindow, windowHandle: windowHandle, depth: depth) {
             elements.append(element)
-            if depth == 0 {
-                print("✅ AccessibilityDriver: Created root element: \(element.role.rawValue)")
-            }
-        } else if depth == 0 {
-            print("❌ AccessibilityDriver: Failed to create element from root AXUIElement")
         }
         
         // Get children
@@ -401,27 +374,10 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
         let result = AXUIElementCopyAttributeValue(axWindow, kAXChildrenAttribute as CFString, &childrenRef)
         
         if result == .success, let children = childrenRef as? [AXUIElement] {
-            if depth == 0 {
-                print("📋 AccessibilityDriver: Found \(children.count) child elements at root level")
-            }
-            
-            for (index, child) in children.prefix(50).enumerated() { // Limit to prevent excessive recursion
+            for child in children.prefix(50) { // Limit to prevent excessive recursion
                 let childElements = try await extractElementsFromWindow(child, windowHandle: windowHandle, depth: depth + 1, maxDepth: maxDepth)
                 elements.append(contentsOf: childElements)
-                
-                if depth == 0 && index < 3 {
-                    print("   Child \(index + 1): Added \(childElements.count) elements")
-                }
             }
-        } else {
-            if depth == 0 {
-                print("⚠️ AccessibilityDriver: No children found or failed to get children")
-                print("   AX Result: \(result)")
-            }
-        }
-        
-        if depth == 0 {
-            print("📊 AccessibilityDriver: Total elements extracted: \(elements.count)")
         }
         
         return elements
@@ -429,9 +385,6 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
     
     private func createUIElement(from axElement: AXUIElement, windowHandle: WindowHandle, depth: Int) throws -> UIElement? {
         guard let roleString = getStringAttribute(from: axElement, attribute: kAXRoleAttribute) else {
-            if depth <= 2 {
-                print("   ⚠️ Element at depth \(depth): No role attribute")
-            }
             return nil
         }
         
@@ -446,10 +399,6 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
         
         // Generate unique ID based on actual element properties
         let elementId = "\(windowHandle.id)_\(roleString)_\(depth)_\(title?.hashValue ?? identifier?.hashValue ?? Int.random(in: 1000...9999))"
-        
-        if depth <= 2 {
-            print("   ✅ Element at depth \(depth): \(roleString) | Title: '\(title ?? "None")' | ID: '\(identifier ?? "None")' | Bounds: \(bounds)")
-        }
         
         return UIElement(
             id: elementId,

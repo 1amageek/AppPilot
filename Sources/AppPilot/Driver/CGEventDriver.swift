@@ -186,8 +186,7 @@ public extension CGEventDriver {
         guard source != .automatic else { return }
         
         let sources = try await getAvailableInputSources()
-        guard let targetSource = sources.first(where: { $0.identifier == source.rawValue }) else {
-            print("⚠️ Input source not found: \(source.rawValue)")
+        guard sources.contains(where: { $0.identifier == source.rawValue }) else {
             return
         }
         
@@ -208,7 +207,6 @@ public extension CGEventDriver {
                     if result != noErr {
                         throw PilotError.osFailure(api: "TISSelectInputSource", code: result)
                     }
-                    print("✅ Switched to input source: \(source.displayName)")
                     return
                 }
             }
