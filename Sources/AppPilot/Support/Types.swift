@@ -1,27 +1,45 @@
 import Foundation
 import CoreGraphics
 
-// MARK: - Core Identifiers
+// MARK: - Core Identifiers (v3.0 - Handle-based)
 
-public struct AppID: Hashable, Sendable {
-    public let pid: pid_t
+public struct AppHandle: Hashable, Sendable, Codable {
+    public let id: String
     
-    public init(pid: pid_t) {
+    public init(id: String) {
+        self.id = id
+    }
+}
+
+public struct WindowHandle: Hashable, Sendable, Codable {
+    public let id: String
+    
+    public init(id: String) {
+        self.id = id
+    }
+}
+
+// MARK: - Legacy Support (Internal Use)
+
+internal struct AppID: Hashable, Sendable {
+    internal let pid: pid_t
+    
+    internal init(pid: pid_t) {
         self.pid = pid
     }
 }
 
-public struct WindowID: Hashable, Sendable {
-    public let id: CGWindowID
+internal struct WindowID: Hashable, Sendable {
+    internal let id: CGWindowID
     
-    public init(id: CGWindowID) {
+    internal init(id: CGWindowID) {
         self.id = id
     }
 }
 
 // MARK: - Geometry
 
-public struct Point: Sendable {
+public struct Point: Sendable, Equatable {
     public let x: CGFloat
     public let y: CGFloat
     
@@ -76,36 +94,116 @@ public enum MouseButton: Sendable {
     }
 }
 
-// MARK: - Wait Specifications
+// MARK: - UI Element System (v3.0)
+
+public struct UIElement: Sendable, Codable {
+    public let id: String
+    public let role: ElementRole
+    public let title: String?
+    public let value: String?
+    public let identifier: String?
+    public let bounds: CGRect
+    public let isEnabled: Bool
+    
+    public var centerPoint: Point {
+        Point(x: bounds.midX, y: bounds.midY)
+    }
+    
+    public init(
+        id: String,
+        role: ElementRole,
+        title: String? = nil,
+        value: String? = nil,
+        identifier: String? = nil,
+        bounds: CGRect,
+        isEnabled: Bool = true
+    ) {
+        self.id = id
+        self.role = role
+        self.title = title
+        self.value = value
+        self.identifier = identifier
+        self.bounds = bounds
+        self.isEnabled = isEnabled
+    }
+}
+
+public enum ElementRole: String, Sendable, CaseIterable, Codable {
+    case button = "AXButton"
+    case textField = "AXTextField"
+    case searchField = "AXSearchField"
+    case menuItem = "AXMenuItem"
+    case menuBar = "AXMenuBar"
+    case menuBarItem = "AXMenuBarItem"
+    case checkBox = "AXCheckBox"
+    case radioButton = "AXRadioButton"
+    case link = "AXLink"
+    case tab = "AXTab"
+    case window = "AXWindow"
+    case staticText = "AXStaticText"
+    case group = "AXGroup"
+    case scrollArea = "AXScrollArea"
+    case image = "AXImage"
+    case list = "AXList"
+    case table = "AXTable"
+    case cell = "AXCell"
+    case popUpButton = "AXPopUpButton"
+    case slider = "AXSlider"
+    case unknown = "AXUnknown"
+    
+    public var isClickable: Bool {
+        switch self {
+        case .button, .menuItem, .menuBarItem, .checkBox, .radioButton, .link, .tab, .popUpButton:
+            return true
+        default:
+            return false
+        }
+    }
+    
+    public var isTextInput: Bool {
+        switch self {
+        case .textField, .searchField:
+            return true
+        default:
+            return false
+        }
+    }
+}
+
+// MARK: - Wait Specifications (v3.0)
 
 public enum WaitSpec: Sendable {
     case time(seconds: TimeInterval)
-    case uiChange(window: WindowID, timeout: TimeInterval)
+    case elementAppear(window: WindowHandle, role: ElementRole, title: String)
+    case elementDisappear(window: WindowHandle, role: ElementRole, title: String)
+    case uiChange(window: WindowHandle, timeout: TimeInterval)
 }
 
-// MARK: - Result Types
+// MARK: - Result Types (v3.0)
 
 public struct ActionResult: Sendable {
     public let success: Bool
     public let timestamp: Date
-    public let screenCoordinates: Point?
+    public let element: UIElement?
+    public let coordinates: Point?
     
-    public init(success: Bool, timestamp: Date = Date(), screenCoordinates: Point? = nil) {
+    public init(success: Bool, timestamp: Date = Date(), element: UIElement? = nil, coordinates: Point? = nil) {
         self.success = success
         self.timestamp = timestamp
-        self.screenCoordinates = screenCoordinates
+        self.element = element
+        self.coordinates = coordinates
     }
 }
 
-// MARK: - Application Info
+// MARK: - Application Info (v3.0)
 
-public struct AppInfo: Sendable {
-    public let id: AppID
+public struct AppInfo: Sendable, Codable {
+    public let id: AppHandle
     public let name: String
     public let bundleIdentifier: String?
     public let isActive: Bool
     
-    public init(id: AppID, name: String, bundleIdentifier: String? = nil, isActive: Bool = false) {
+    public init(id: AppHandle, name: String, bundleIdentifier: String? = nil, isActive: Bool = false) {
         self.id = id
         self.name = name
         self.bundleIdentifier = bundleIdentifier
@@ -113,20 +211,22 @@ public struct AppInfo: Sendable {
     }
 }
 
-// MARK: - Window Info
+// MARK: - Window Info (v3.0)
 
-public struct WindowInfo: Sendable {
-    public let id: WindowID
+public struct WindowInfo: Sendable, Codable {
+    public let id: WindowHandle
     public let title: String?
     public let bounds: CGRect  // Screen coordinates
-    public let isMinimized: Bool
+    public let isVisible: Bool
+    public let isMain: Bool
     public let appName: String
     
-    public init(id: WindowID, title: String?, bounds: CGRect, isMinimized: Bool, appName: String) {
+    public init(id: WindowHandle, title: String?, bounds: CGRect, isVisible: Bool, isMain: Bool, appName: String) {
         self.id = id
         self.title = title
         self.bounds = bounds
-        self.isMinimized = isMinimized
+        self.isVisible = isVisible
+        self.isMain = isMain
         self.appName = appName
     }
 }
@@ -141,17 +241,21 @@ public struct AXEvent: Sendable {
         case titleChanged
         case focusChanged
         case valueChanged
+        case elementAppeared
+        case elementDisappeared
         case overflow
     }
     
     public let type: EventType
-    public let windowID: WindowID
+    public let windowHandle: WindowHandle
+    public let element: UIElement?
     public let timestamp: Date
     public let description: String?
     
-    public init(type: EventType, windowID: WindowID, timestamp: Date = Date(), description: String? = nil) {
+    public init(type: EventType, windowHandle: WindowHandle, element: UIElement? = nil, timestamp: Date = Date(), description: String? = nil) {
         self.type = type
-        self.windowID = windowID
+        self.windowHandle = windowHandle
+        self.element = element
         self.timestamp = timestamp
         self.description = description
     }

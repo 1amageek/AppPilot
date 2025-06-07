@@ -94,6 +94,10 @@ public protocol CGEventDriver: Sendable {
     
     // Convenience high‑level typing
     func type(_ text: String) async throws
+    
+    // v3.0 Compatibility methods
+    func click(at point: Point, button: MouseButton, count: Int) async throws
+    func type(text: String) async throws
 }
 
 // MARK: - High‑Level Default Implementations ▸────────────────────────────
@@ -103,6 +107,20 @@ public extension CGEventDriver {
     @inline(__always) func click(at p: Point, button: MouseButton = .left) async throws {
         try await mouseDown(button: button, at: p)
         try await mouseUp(button: button,   at: p)
+    }
+    
+    // v3.0 Compatibility methods
+    func click(at point: Point, button: MouseButton = .left, count: Int = 1) async throws {
+        for _ in 0..<count {
+            try await click(at: point, button: button)
+            if count > 1 {
+                try await Task.sleep(nanoseconds: 150_000_000) // 150ms between clicks
+            }
+        }
+    }
+    
+    func type(text: String) async throws {
+        try await type(text)
     }
     
     @inline(__always) func doubleClick(at p: Point, button: MouseButton = .left, interval: UInt64 = 150) async throws {

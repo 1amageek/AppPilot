@@ -17,400 +17,225 @@ public actor AppPilot {
         self.accessibilityDriver = accessibilityDriver ?? DefaultAccessibilityDriver()
     }
     
-    // MARK: - Query Operations
+    // MARK: - Application Management
     
     /// Get all running applications
     public func listApplications() async throws -> [AppInfo] {
         print("📱 AppPilot: Listing applications")
-        
-        guard let windowList = CGWindowListCopyWindowInfo([.excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else {
-            throw PilotError.osFailure(api: "CGWindowListCopyWindowInfo", code: -1)
-        }
-        
-        var appDict: [pid_t: AppInfo] = [:]
-        
-        for windowInfo in windowList {
-            guard let pid = windowInfo[kCGWindowOwnerPID as String] as? pid_t,
-                  let appName = windowInfo[kCGWindowOwnerName as String] as? String else {
-                continue
-            }
-            
-            if appDict[pid] == nil {
-                let bundleId = getBundleIdentifier(for: pid)
-                let isActive = isApplicationActive(pid: pid)
-                
-                appDict[pid] = AppInfo(
-                    id: AppID(pid: pid),
-                    name: appName,
-                    bundleIdentifier: bundleId,
-                    isActive: isActive
-                )
-            }
-        }
-        
-        let apps = Array(appDict.values).sorted { $0.name < $1.name }
-        print("✅ AppPilot: Found \(apps.count) applications")
-        return apps
+        return try await accessibilityDriver.getApplications()
+    }
+    
+    /// Find application by bundle ID
+    public func findApplication(bundleId: String) async throws -> AppHandle {
+        print("🔍 AppPilot: Finding application with bundle ID: \(bundleId)")
+        return try await accessibilityDriver.findApplication(bundleId: bundleId)
+    }
+    
+    /// Find application by name
+    public func findApplication(name: String) async throws -> AppHandle {
+        print("🔍 AppPilot: Finding application with name: \(name)")
+        return try await accessibilityDriver.findApplication(name: name)
     }
     
     /// Get windows for an application
-    public func listWindows(app: AppID) async throws -> [WindowInfo] {
-        print("🪟 AppPilot: Listing windows for app PID \(app.pid)")
+    public func listWindows(app: AppHandle) async throws -> [WindowInfo] {
+        print("🪟 AppPilot: Listing windows for app: \(app.id)")
+        return try await accessibilityDriver.getWindows(for: app)
+    }
+    
+    /// Find window by title
+    public func findWindow(app: AppHandle, title: String) async throws -> WindowHandle {
+        print("🔍 AppPilot: Finding window with title: \(title)")
+        return try await accessibilityDriver.findWindow(app: app, title: title)
+    }
+    
+    /// Find window by index
+    public func findWindow(app: AppHandle, index: Int) async throws -> WindowHandle {
+        print("🔍 AppPilot: Finding window at index: \(index)")
+        return try await accessibilityDriver.findWindow(app: app, index: index)
+    }
+    
+    // MARK: - UI Element Discovery
+    
+    /// Find UI elements by criteria
+    public func findElements(
+        in window: WindowHandle,
+        role: ElementRole? = nil,
+        title: String? = nil,
+        identifier: String? = nil
+    ) async throws -> [UIElement] {
+        print("🎯 AppPilot: Finding elements in window: \(window.id)")
+        print("   Role: \(role?.rawValue ?? "any")")
+        print("   Title: \(title ?? "any")")
+        print("   Identifier: \(identifier ?? "any")")
         
-        guard let windowList = CGWindowListCopyWindowInfo([.excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else {
-            throw PilotError.osFailure(api: "CGWindowListCopyWindowInfo", code: -1)
-        }
+        let elements = try await accessibilityDriver.findElements(
+            in: window,
+            role: role,
+            title: title,
+            identifier: identifier
+        )
         
-        var windows: [WindowInfo] = []
+        print("✅ AppPilot: Found \(elements.count) elements")
+        return elements
+    }
+    
+    /// Find specific UI element
+    public func findElement(
+        in window: WindowHandle,
+        role: ElementRole,
+        title: String
+    ) async throws -> UIElement {
+        print("🎯 AppPilot: Finding element \(role.rawValue) with title: \(title)")
         
-        for windowInfo in windowList {
-            guard let pid = windowInfo[kCGWindowOwnerPID as String] as? pid_t,
-                  pid == app.pid,
-                  let windowID = windowInfo[kCGWindowNumber as String] as? CGWindowID,
-                  let boundsDict = windowInfo[kCGWindowBounds as String] as? [String: Any],
-                  let x = boundsDict["X"] as? CGFloat,
-                  let y = boundsDict["Y"] as? CGFloat,
-                  let width = boundsDict["Width"] as? CGFloat,
-                  let height = boundsDict["Height"] as? CGFloat else {
-                continue
+        let element = try await accessibilityDriver.findElement(
+            in: window,
+            role: role,
+            title: title
+        )
+        
+        print("✅ AppPilot: Found element: \(element.id)")
+        return element
+    }
+    
+    /// Find button by title
+    public func findButton(
+        in window: WindowHandle,
+        title: String
+    ) async throws -> UIElement {
+        print("🔘 AppPilot: Finding button with title: \(title)")
+        return try await findElement(in: window, role: .button, title: title)
+    }
+    
+    /// Find text field
+    public func findTextField(
+        in window: WindowHandle,
+        placeholder: String? = nil
+    ) async throws -> UIElement {
+        print("📝 AppPilot: Finding text field")
+        
+        // Try to find by placeholder first, then any text field
+        if let placeholder = placeholder {
+            do {
+                return try await findElement(in: window, role: .textField, title: placeholder)
+            } catch {
+                // Fall back to search field
+                return try await findElement(in: window, role: .searchField, title: placeholder)
+            }
+        } else {
+            // Find any text input field
+            let textFields = try await findElements(in: window, role: .textField)
+            if !textFields.isEmpty {
+                return textFields[0]
             }
             
-            let title = windowInfo[kCGWindowName as String] as? String
-            let appName = windowInfo[kCGWindowOwnerName as String] as? String ?? "Unknown"
-            let bounds = CGRect(x: x, y: y, width: width, height: height)
-            let isMinimized = isWindowMinimized(windowID: windowID)
+            let searchFields = try await findElements(in: window, role: .searchField)
+            if !searchFields.isEmpty {
+                return searchFields[0]
+            }
             
-            windows.append(WindowInfo(
-                id: WindowID(id: windowID),
-                title: title,
-                bounds: bounds,
-                isMinimized: isMinimized,
-                appName: appName
-            ))
+            throw PilotError.elementNotFound(role: .textField, title: nil)
+        }
+    }
+    
+    // MARK: - Element-Based Actions
+    
+    /// Click UI element (automatically calculates center point)
+    public func click(element: UIElement) async throws -> ActionResult {
+        print("🖱️ AppPilot: Clicking element: \(element.role.rawValue) '\(element.title ?? element.id)'")
+        
+        // Verify element is still accessible and enabled
+        guard try await accessibilityDriver.elementExists(element) && element.isEnabled else {
+            throw PilotError.elementNotAccessible(element.id)
         }
         
-        print("✅ AppPilot: Found \(windows.count) windows")
-        return windows
+        // Calculate center point automatically
+        let centerPoint = element.centerPoint
+        print("   Center point: (\(centerPoint.x), \(centerPoint.y))")
+        
+        // Note: Element-based operations cannot ensure app focus without window context
+        // For safer operations, use click(window:at:) or clickElement(_:in:)
+        print("   ⚠️ Warning: Cannot ensure target app focus for element-only operation")
+        
+        // Perform CGEvent click at the center point
+        try await cgEventDriver.click(at: centerPoint)
+        
+        return ActionResult(
+            success: true,
+            element: element,
+            coordinates: centerPoint
+        )
     }
     
-    /// Capture screenshot of window
-    public func capture(window: WindowID) async throws -> CGImage {
-        print("📷 AppPilot: Capturing window \(window.id)")
+    /// Type text into UI element
+    public func type(text: String, into element: UIElement) async throws -> ActionResult {
+        print("⌨️ AppPilot: Typing into element: \(element.role.rawValue)")
+        print("   Text: \(text.prefix(50))\(text.count > 50 ? "..." : "")")
         
-        // Use ScreenDriver for screenshot capture
-        let image = try await screenDriver.captureWindow(window)
-        
-        print("✅ AppPilot: Screenshot captured")
-        return image
-    }
-    
-    /// Get window bounds in screen coordinates
-    public func getWindowBounds(window: WindowID) async throws -> CGRect {
-        print("📐 AppPilot: Getting bounds for window \(window.id)")
-        
-        guard let windowList = CGWindowListCopyWindowInfo([.optionIncludingWindow], window.id) as? [[String: Any]],
-              let windowInfo = windowList.first,
-              let boundsDict = windowInfo[kCGWindowBounds as String] as? [String: Any],
-              let x = boundsDict["X"] as? CGFloat,
-              let y = boundsDict["Y"] as? CGFloat,
-              let width = boundsDict["Width"] as? CGFloat,
-              let height = boundsDict["Height"] as? CGFloat else {
-            throw PilotError.windowNotFound(window)
+        // Verify element is accessible and is a text input
+        guard try await accessibilityDriver.elementExists(element) && element.isEnabled else {
+            throw PilotError.elementNotAccessible(element.id)
         }
         
-        let bounds = CGRect(x: x, y: y, width: width, height: height)
-        print("✅ AppPilot: Window bounds: \(bounds)")
-        return bounds
+        guard element.role.isTextInput else {
+            throw PilotError.invalidArgument("Element \(element.role.rawValue) is not a text input field")
+        }
+        
+        // Note: Element-based operations cannot ensure app focus without window context
+        // For safer operations, use typeIntoElement(_:text:in:)
+        print("   ⚠️ Warning: Cannot ensure target app focus for element-only operation")
+        
+        // Click the element first to focus it
+        let _ = try await click(element: element)
+        
+        // Wait a moment for focus to be established
+        try await wait(.time(seconds: 0.1))
+        
+        // Type the text
+        try await cgEventDriver.type(text: text)
+        
+        return ActionResult(
+            success: true,
+            element: element,
+            coordinates: element.centerPoint
+        )
     }
     
-    /// Subscribe to UI changes in window
-    public func subscribeAX(window: WindowID) -> AsyncStream<AXEvent> {
-        print("👀 AppPilot: Subscribing to AX events for window \(window.id)")
+    /// Get value from UI element
+    public func getValue(from element: UIElement) async throws -> String? {
+        print("📖 AppPilot: Getting value from element: \(element.id)")
+        return try await accessibilityDriver.getValue(from: element)
+    }
+    
+    /// Check if element exists and is valid
+    public func elementExists(_ element: UIElement) async throws -> Bool {
+        return try await accessibilityDriver.elementExists(element)
+    }
+    
+    // MARK: - Wait Operations
+    
+    /// Wait for element to appear
+    public func waitForElement(
+        in window: WindowHandle,
+        role: ElementRole,
+        title: String,
+        timeout: TimeInterval = 10.0
+    ) async throws -> UIElement {
+        print("⏰ AppPilot: Waiting for element \(role.rawValue) with title: \(title)")
         
-        return AsyncStream<AXEvent> { continuation in
-            Task {
-                // TODO: Implement real AXObserver-based event monitoring
-                // This is a placeholder implementation for development
-                continuation.yield(AXEvent(
-                    type: .created,
-                    windowID: window,
-                    description: "Placeholder AX event"
-                ))
-                continuation.finish()
+        let startTime = Date()
+        while Date().timeIntervalSince(startTime) < timeout {
+            do {
+                let element = try await findElement(in: window, role: role, title: title)
+                print("✅ AppPilot: Element appeared after \(String(format: "%.1f", Date().timeIntervalSince(startTime)))s")
+                return element
+            } catch PilotError.elementNotFound {
+                // Element not found yet, wait and retry
+                try await wait(.time(seconds: 0.5))
             }
         }
-    }
-    
-    // MARK: - Coordinate Conversion Helper
-    
-    /// Convert window-relative point to screen coordinates
-    public func windowToScreen(point: Point, window: WindowID) async throws -> Point {
-        let bounds = try await getWindowBounds(window: window)
-        return Point(x: bounds.minX + point.x, y: bounds.minY + point.y)
-    }
-    
-    // MARK: - Screen Automation Operations (Global Coordinates)
-    
-    /// Click at screen coordinates
-    public func click(
-        at screenPoint: Point,
-        button: MouseButton = .left,
-        count: Int = 1
-    ) async throws -> ActionResult {
-        print("🖱️ AppPilot: Click at screen coordinates (\(screenPoint.x), \(screenPoint.y))")
         
-        // Check accessibility permission
-        guard AXIsProcessTrusted() else {
-            throw PilotError.permissionDenied("Accessibility permission required for CGEvent automation")
-        }
-        
-        // Validate coordinates
-        let screenBounds = CGDisplayBounds(CGMainDisplayID())
-        if screenPoint.x < 0 || screenPoint.x > screenBounds.width ||
-           screenPoint.y < 0 || screenPoint.y > screenBounds.height {
-            throw PilotError.coordinateOutOfBounds(screenPoint)
-        }
-        
-        // Use new CGEventDriver extension method for click
-        for _ in 0..<count {
-            try await cgEventDriver.click(at: screenPoint, button: button)
-            if count > 1 {
-                try await Task.sleep(nanoseconds: 100_000_000) // 100ms between clicks
-            }
-        }
-        
-        return ActionResult(
-            success: true,
-            timestamp: Date(),
-            screenCoordinates: screenPoint
-        )
-    }
-    
-    /// Type text to currently focused application
-    public func type(text: String) async throws -> ActionResult {
-        print("⌨️ AppPilot: Type text '\(text)'")
-        
-        guard AXIsProcessTrusted() else {
-            throw PilotError.permissionDenied("Accessibility permission required for CGEvent automation")
-        }
-        
-        guard !text.isEmpty else {
-            throw PilotError.invalidArgument("Text cannot be empty")
-        }
-        
-        try await cgEventDriver.type(text)
-        
-        return ActionResult(
-            success: true,
-            timestamp: Date(),
-            screenCoordinates: nil
-        )
-    }
-    
-    /// Perform drag from point to point
-    public func drag(
-        from startPoint: Point,
-        to endPoint: Point,
-        duration: TimeInterval = 1.0,
-        button: MouseButton = .left
-    ) async throws -> ActionResult {
-        print("👆 AppPilot: Drag from (\(startPoint.x), \(startPoint.y)) to (\(endPoint.x), \(endPoint.y))")
-        
-        guard AXIsProcessTrusted() else {
-            throw PilotError.permissionDenied("Accessibility permission required for CGEvent automation")
-        }
-        
-        guard duration > 0 else {
-            throw PilotError.invalidArgument("Duration must be positive")
-        }
-        
-        try await cgEventDriver.drag(from: startPoint, to: endPoint, duration: duration, button: button)
-        
-        return ActionResult(
-            success: true,
-            timestamp: Date(),
-            screenCoordinates: endPoint
-        )
-    }
-    
-    /// Pinch gesture (zoom in/out)
-    public func pinch(
-        center: Point,
-        scale: Double,
-        duration: TimeInterval = 0.5
-    ) async throws -> ActionResult {
-        print("🤏 AppPilot: Pinch at (\(center.x), \(center.y)) scale=\(scale)")
-        
-        guard AXIsProcessTrusted() else {
-            throw PilotError.permissionDenied("Accessibility permission required for CGEvent automation")
-        }
-        
-        guard scale > 0 else {
-            throw PilotError.invalidArgument("Scale must be positive")
-        }
-        
-        // Simulate pinch with scroll + modifier keys
-        try await cgEventDriver.moveCursor(to: center)
-        try await cgEventDriver.keyDown(code: ModifierKey.control.keyCode)
-        let deltaY = scale > 1.0 ? 10.0 : -10.0
-        try await cgEventDriver.scroll(deltaX: 0, deltaY: deltaY, at: center)
-        try await cgEventDriver.keyUp(code: ModifierKey.control.keyCode)
-        
-        return ActionResult(
-            success: true,
-            timestamp: Date(),
-            screenCoordinates: center
-        )
-    }
-    
-    /// Rotation gesture
-    public func rotate(
-        center: Point,
-        degrees: Double,
-        duration: TimeInterval = 0.5
-    ) async throws -> ActionResult {
-        print("🔄 AppPilot: Rotate at (\(center.x), \(center.y)) by \(degrees)°")
-        
-        guard AXIsProcessTrusted() else {
-            throw PilotError.permissionDenied("Accessibility permission required for CGEvent automation")
-        }
-        
-        // Simulate rotation with circular movement
-        let radius: Double = 50.0
-        let steps = max(20, Int(duration * 30))
-        let angleStep = (degrees * .pi / 180) / Double(steps)
-        
-        for i in 0..<steps {
-            let angle = angleStep * Double(i)
-            let x = center.x + radius * cos(angle)
-            let y = center.y + radius * sin(angle)
-            try await cgEventDriver.moveCursor(to: Point(x: x, y: y))
-            try await Task.sleep(nanoseconds: UInt64(duration * 1_000_000_000 / Double(steps)))
-        }
-        
-        return ActionResult(
-            success: true,
-            timestamp: Date(),
-            screenCoordinates: center
-        )
-    }
-    
-    /// Swipe gesture
-    public func swipe(
-        from startPoint: Point,
-        direction: SwipeDirection,
-        distance: Double = 100,
-        duration: TimeInterval = 0.3
-    ) async throws -> ActionResult {
-        print("👋 AppPilot: Swipe from (\(startPoint.x), \(startPoint.y)) \(direction)")
-        
-        guard AXIsProcessTrusted() else {
-            throw PilotError.permissionDenied("Accessibility permission required for CGEvent automation")
-        }
-        
-        guard distance > 0 else {
-            throw PilotError.invalidArgument("Distance must be positive")
-        }
-        
-        try await cgEventDriver.swipe(from: startPoint, direction: direction, distance: distance, duration: duration)
-        
-        let vector = direction.vector
-        let endPoint = Point(
-            x: startPoint.x + vector.x * distance,
-            y: startPoint.y + vector.y * distance
-        )
-        
-        return ActionResult(
-            success: true,
-            timestamp: Date(),
-            screenCoordinates: endPoint
-        )
-    }
-    
-    /// Scroll at specific point
-    public func scroll(
-        at point: Point,
-        deltaX: Double = 0,
-        deltaY: Double = 0
-    ) async throws -> ActionResult {
-        print("📜 AppPilot: Scroll at (\(point.x), \(point.y))")
-        
-        guard AXIsProcessTrusted() else {
-            throw PilotError.permissionDenied("Accessibility permission required for CGEvent automation")
-        }
-        
-        try await cgEventDriver.scroll(deltaX: deltaX, deltaY: deltaY, at: point)
-        
-        return ActionResult(
-            success: true,
-            timestamp: Date(),
-            screenCoordinates: point
-        )
-    }
-    
-    /// Double-tap then drag (common in map applications)
-    public func doubleTapAndDrag(
-        tapPoint: Point,
-        dragTo endPoint: Point,
-        duration: TimeInterval = 1.0
-    ) async throws -> ActionResult {
-        print("🖱️➕👆 AppPilot: Double-tap and drag")
-        
-        guard AXIsProcessTrusted() else {
-            throw PilotError.permissionDenied("Accessibility permission required for CGEvent automation")
-        }
-        
-        // Implement double-tap and drag using extension methods
-        try await cgEventDriver.doubleClick(at: tapPoint)
-        try await Task.sleep(nanoseconds: 100_000_000) // 100ms pause
-        try await cgEventDriver.drag(from: tapPoint, to: endPoint, duration: duration)
-        
-        return ActionResult(
-            success: true,
-            timestamp: Date(),
-            screenCoordinates: endPoint
-        )
-    }
-    
-    /// Key press with modifiers
-    public func keyPress(
-        key: VirtualKey,
-        modifiers: [ModifierKey] = [],
-        duration: TimeInterval = 0.1
-    ) async throws -> ActionResult {
-        print("⌨️ AppPilot: Key press \(key)")
-        
-        guard AXIsProcessTrusted() else {
-            throw PilotError.permissionDenied("Accessibility permission required for CGEvent automation")
-        }
-        
-        try await cgEventDriver.keyPress(key, modifiers: modifiers, hold: duration)
-        
-        return ActionResult(
-            success: true,
-            timestamp: Date(),
-            screenCoordinates: nil
-        )
-    }
-    
-    /// Key combination (e.g., Cmd+C)
-    public func keyCombination(
-        _ keys: [VirtualKey],
-        modifiers: [ModifierKey]
-    ) async throws -> ActionResult {
-        print("⌨️ AppPilot: Key combination")
-        
-        guard AXIsProcessTrusted() else {
-            throw PilotError.permissionDenied("Accessibility permission required for CGEvent automation")
-        }
-        
-        try await cgEventDriver.keyCombination(keys, modifiers: modifiers)
-        
-        return ActionResult(
-            success: true,
-            timestamp: Date(),
-            screenCoordinates: nil
-        )
+        throw PilotError.timeout(timeout)
     }
     
     /// Wait for condition
@@ -418,44 +243,351 @@ public actor AppPilot {
         switch spec {
         case .time(let seconds):
             print("⏰ AppPilot: Wait for \(seconds) seconds")
-            guard seconds > 0 else {
-                throw PilotError.invalidArgument("Wait time must be positive")
-            }
             try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
             
+        case .elementAppear(let window, let role, let title):
+            let _ = try await waitForElement(in: window, role: role, title: title)
+            
+        case .elementDisappear(let window, let role, let title):
+            print("⏰ AppPilot: Waiting for element to disappear: \(role.rawValue) '\(title)'")
+            let startTime = Date()
+            let timeout: TimeInterval = 10.0
+            
+            while Date().timeIntervalSince(startTime) < timeout {
+                do {
+                    let _ = try await findElement(in: window, role: role, title: title)
+                    // Element still exists, wait and retry
+                    try await wait(.time(seconds: 0.5))
+                } catch PilotError.elementNotFound {
+                    // Element disappeared
+                    print("✅ AppPilot: Element disappeared")
+                    return
+                }
+            }
+            
+            throw PilotError.timeout(timeout)
+            
         case .uiChange(let window, let timeout):
-            print("👀 AppPilot: Wait for UI change in window \(window.id) (timeout: \(timeout)s)")
-            // TODO: Implement real AX event monitoring for UI changes
-            // This is a placeholder implementation for development
-            try await Task.sleep(nanoseconds: UInt64(min(timeout, 0.1) * 1_000_000_000))
+            print("⏰ AppPilot: Wait for UI change in window: \(window.id)")
+            // Simplified implementation - just wait for time
+            try await wait(.time(seconds: min(timeout, 5.0)))
         }
     }
     
-    // MARK: - Private Helper Methods
+    // MARK: - Application Focus Management
     
-    private func getBundleIdentifier(for pid: pid_t) -> String? {
-        let runningApp = NSRunningApplication(processIdentifier: pid)
-        return runningApp?.bundleIdentifier
-    }
-    
-    private func isApplicationActive(pid: pid_t) -> Bool {
-        let runningApp = NSRunningApplication(processIdentifier: pid)
-        return runningApp?.isActive ?? false
-    }
-    
-    private func isWindowMinimized(windowID: CGWindowID) -> Bool {
-        // This is a simplified check
-        // In a real implementation, you would use more sophisticated detection
-        guard let windowList = CGWindowListCopyWindowInfo([.optionIncludingWindow], windowID) as? [[String: Any]],
-              let windowInfo = windowList.first else {
-            return false
+    /// Ensure target application and window are focused before operations
+    private func ensureTargetAppFocus(for window: WindowHandle) async throws {
+        print("🎯 AppPilot: Ensuring target app focus for window: \(window.id)")
+        
+        // Get window info to find the associated app
+        let apps = try await listApplications()
+        var targetApp: AppInfo?
+        var windowInfo: WindowInfo?
+        
+        print("   Searching through \(apps.count) applications...")
+        
+        // Find which app owns this window
+        for app in apps {
+            print("   Checking app: \(app.name) (ID: \(app.id.id))")
+            do {
+                let windows = try await listWindows(app: app.id)
+                print("     Found \(windows.count) windows for \(app.name)")
+                
+                for win in windows {
+                    print("       Window: \(win.id.id) - '\(win.title ?? "No title")'")
+                    if win.id == window {
+                        targetApp = app
+                        windowInfo = win
+                        print("   ✅ Found window owner: \(app.name) (ID: \(app.id.id))")
+                        break
+                    }
+                }
+                
+                if targetApp != nil { break }
+            } catch {
+                // Skip apps that can't be queried (might not have accessibility permission)
+                print("     ⚠️ Skipping app \(app.name): \(error)")
+                continue
+            }
         }
         
-        // Check if window is on screen (simplified logic)
-        if let onScreen = windowInfo[kCGWindowIsOnscreen as String] as? Bool {
-            return !onScreen
+        guard let app = targetApp, let windowBounds = windowInfo?.bounds else {
+            print("⚠️ AppPilot: Could not find app for window, proceeding without focus")
+            return
         }
         
-        return false
+        print("   Target app: \(app.name)")
+        print("   Window bounds: \(windowBounds)")
+        
+        // Find the NSRunningApplication for activation
+        let runningApps = NSWorkspace.shared.runningApplications
+        guard let nsApp = runningApps.first(where: { 
+            $0.bundleIdentifier == app.bundleIdentifier || $0.localizedName == app.name 
+        }) else {
+            print("⚠️ AppPilot: Could not find NSRunningApplication, proceeding without focus")
+            return
+        }
+        
+        // Check if app is already frontmost
+        let currentFrontmost = NSWorkspace.shared.frontmostApplication
+        if currentFrontmost?.processIdentifier == nsApp.processIdentifier {
+            print("✅ AppPilot: Target app already focused")
+            return
+        }
+        
+        // Activate the target application
+        print("   Activating target application...")
+        let activated = nsApp.activate(options: [.activateIgnoringOtherApps])
+        
+        if activated {
+            print("✅ AppPilot: Target app activated")
+            
+            // Wait for activation to complete
+            try await wait(.time(seconds: 0.5))
+            
+            // Verify activation
+            let newFrontmost = NSWorkspace.shared.frontmostApplication
+            if newFrontmost?.processIdentifier == nsApp.processIdentifier {
+                print("✅ AppPilot: Target app focus verified")
+            } else {
+                print("⚠️ AppPilot: App activation verification failed, but proceeding")
+            }
+        } else {
+            print("⚠️ AppPilot: Failed to activate target app, proceeding anyway")
+        }
+    }
+    
+    /// Validate that coordinates are within window bounds
+    private func validateCoordinates(_ point: Point, for window: WindowHandle) async throws {
+        // Get window info
+        let apps = try await listApplications()
+        for app in apps {
+            do {
+                let windows = try await listWindows(app: app.id)
+                if let windowInfo = windows.first(where: { $0.id == window }) {
+                    let bounds = windowInfo.bounds
+                    
+                    print("   Validating coordinates against window bounds: \(bounds)")
+                    
+                    // Check if point is within window bounds (with some tolerance)
+                    let tolerance: CGFloat = 50
+                    let expandedBounds = CGRect(
+                        x: bounds.minX - tolerance,
+                        y: bounds.minY - tolerance,
+                        width: bounds.width + tolerance * 2,
+                        height: bounds.height + tolerance * 2
+                    )
+                    
+                    if !expandedBounds.contains(CGPoint(x: point.x, y: point.y)) {
+                        print("⚠️ AppPilot: Click point (\(point.x), \(point.y)) is outside window bounds \(bounds)")
+                        print("   Proceeding anyway for testing purposes")
+                    } else {
+                        print("✅ AppPilot: Click point is within window bounds")
+                    }
+                    return
+                }
+            } catch {
+                // Skip apps that can't be queried
+                continue
+            }
+        }
+        
+        print("⚠️ AppPilot: Could not validate coordinates - window not found")
+    }
+    
+    // MARK: - Fallback Coordinate Operations
+    
+    /// Click at coordinates (fallback when element detection fails)
+    public func click(
+        window: WindowHandle,
+        at point: Point,
+        button: MouseButton = .left,
+        count: Int = 1
+    ) async throws -> ActionResult {
+        print("🖱️ AppPilot: Focused coordinate click at (\(point.x), \(point.y))")
+        print("   Button: \(button), Count: \(count)")
+        
+        // Ensure target app is focused before clicking
+        try await ensureTargetAppFocus(for: window)
+        
+        // Validate coordinates are reasonable
+        try await validateCoordinates(point, for: window)
+        
+        // Use CGEventDriver for the actual click
+        try await cgEventDriver.click(at: point, button: button, count: count)
+        
+        return ActionResult(
+            success: true,
+            coordinates: point
+        )
+    }
+    
+    /// Type text to currently focused application (fallback)
+    public func type(text: String) async throws -> ActionResult {
+        print("⌨️ AppPilot: Fallback text input")
+        print("   Text: \(text.prefix(50))\(text.count > 50 ? "..." : "")")
+        
+        // Note: Without window context, we cannot ensure specific app focus
+        // This is a fallback method for backwards compatibility
+        print("   ⚠️ Warning: Cannot ensure target app focus without window context")
+        
+        try await cgEventDriver.type(text: text)
+        
+        return ActionResult(success: true)
+    }
+    
+    /// Perform gesture from one point to another (fallback)
+    public func gesture(from startPoint: Point, to endPoint: Point, duration: TimeInterval = 1.0) async throws -> ActionResult {
+        print("👆 AppPilot: Gesture from (\(startPoint.x), \(startPoint.y)) to (\(endPoint.x), \(endPoint.y))")
+        
+        // Note: Without window context, we cannot ensure specific app focus
+        // This is a fallback method for backwards compatibility
+        print("   ⚠️ Warning: Cannot ensure target app focus without window context")
+        
+        try await cgEventDriver.drag(from: startPoint, to: endPoint, duration: duration)
+        
+        return ActionResult(
+            success: true,
+            coordinates: endPoint
+        )
+    }
+    
+    /// Capture screenshot of window
+    public func capture(window: WindowHandle) async throws -> CGImage {
+        print("📷 AppPilot: Capturing window screenshot: \(window.id)")
+        
+        // For now, use ScreenDriver - would need to map WindowHandle to actual window
+        return try await screenDriver.captureScreen()
+    }
+    
+    // MARK: - Convenience Methods
+    
+    /// Get accessible applications that can be automated
+    public func getAccessibleApplications() async throws -> [AppInfo] {
+        guard await accessibilityDriver.checkPermission() else {
+            throw PilotError.permissionDenied("Accessibility permission required. Please grant access in System Settings > Privacy & Security > Accessibility")
+        }
+        
+        return try await listApplications()
+    }
+    
+    /// Find all clickable elements in a window
+    public func findClickableElements(in window: WindowHandle) async throws -> [UIElement] {
+        let allElements = try await findElements(in: window)
+        return allElements.filter { $0.role.isClickable && $0.isEnabled }
+    }
+    
+    /// Find all text input elements in a window
+    public func findTextInputElements(in window: WindowHandle) async throws -> [UIElement] {
+        let allElements = try await findElements(in: window)
+        return allElements.filter { $0.role.isTextInput && $0.isEnabled }
+    }
+    
+    // MARK: - Element-based Actions
+    
+    /// Click on a specific UI element
+    public func clickElement(_ element: UIElement, in window: WindowHandle) async throws -> ActionResult {
+        print("🎯 AppPilot: Clicking element \(element.role): \(element.title ?? element.id)")
+        print("   Element bounds: \(element.bounds)")
+        print("   Center point: \(element.centerPoint)")
+        
+        // Ensure target app is focused before clicking
+        try await ensureTargetAppFocus(for: window)
+        
+        // Use the element's center point for clicking
+        let result = try await click(window: window, at: element.centerPoint)
+        
+        return ActionResult(
+            success: result.success,
+            coordinates: element.centerPoint
+        )
+    }
+    
+    /// Type text into a specific UI element (focuses first)
+    public func typeIntoElement(_ element: UIElement, text: String, in window: WindowHandle) async throws -> ActionResult {
+        print("⌨️ AppPilot: Typing into element \(element.role): \(element.title ?? element.id)")
+        print("   Text: \(text.prefix(50))\(text.count > 50 ? "..." : "")")
+        
+        // Ensure target app is focused before any operations
+        try await ensureTargetAppFocus(for: window)
+        
+        // First click on the element to focus it
+        let clickResult = try await clickElement(element, in: window)
+        guard clickResult.success else {
+            throw PilotError.elementNotAccessible("Could not focus element for typing")
+        }
+        
+        // Wait a bit for focus
+        try await wait(.time(seconds: 0.2))
+        
+        // Then type the text
+        let typeResult = try await type(text: text)
+        
+        return ActionResult(
+            success: typeResult.success,
+            coordinates: element.centerPoint
+        )
+    }
+    
+    // MARK: - Legacy API Compatibility (for existing tests)
+    
+    /// Legacy method for screen coordinate clicks (without window context)
+    public func click(at point: Point, button: MouseButton = .left, count: Int = 1) async throws -> ActionResult {
+        print("🖱️ AppPilot: Legacy screen coordinate click at (\(point.x), \(point.y))")
+        
+        try await cgEventDriver.click(at: point, button: button, count: count)
+        
+        return ActionResult(
+            success: true,
+            coordinates: point
+        )
+    }
+    
+    /// Legacy drag/gesture method  
+    public func drag(from startPoint: Point, to endPoint: Point, duration: TimeInterval = 1.0) async throws -> ActionResult {
+        return try await gesture(from: startPoint, to: endPoint, duration: duration)
+    }
+    
+    /// Pinch gesture for zoom (legacy compatibility)
+    public func pinch(center: Point, scale: CGFloat, duration: TimeInterval = 1.0) async throws -> ActionResult {
+        print("🤏 AppPilot: Pinch gesture at (\(center.x), \(center.y)) scale: \(scale)")
+        
+        // Simulate pinch by moving fingers apart/together
+        let distance = CGFloat(50 * scale)
+        let startPoint1 = Point(x: center.x - distance/2, y: center.y)
+        let endPoint1 = Point(x: center.x - distance, y: center.y)
+        let startPoint2 = Point(x: center.x + distance/2, y: center.y)
+        let endPoint2 = Point(x: center.x + distance, y: center.y)
+        
+        // For now, just do a simple gesture
+        try await gesture(from: startPoint1, to: endPoint1, duration: duration)
+        
+        return ActionResult(
+            success: true,
+            coordinates: center
+        )
+    }
+    
+    /// Key combination support
+    public func keyCombination(_ keys: [VirtualKey], modifiers: [ModifierKey]) async throws -> ActionResult {
+        print("⌨️ AppPilot: Key combination - modifiers: \(modifiers), keys: \(keys)")
+        
+        // Use CGEventDriver for key combinations
+        try await cgEventDriver.keyCombination(keys, modifiers: modifiers)
+        
+        return ActionResult(success: true)
+    }
+}
+
+// MARK: - Internal Helper Extensions
+
+extension AppPilot {
+    
+    /// Quick method to find app and window for testing
+    internal func findTestApp(name: String = "TestApp") async throws -> (app: AppHandle, window: WindowHandle) {
+        let app = try await findApplication(name: name)
+        let window = try await findWindow(app: app, index: 0)
+        return (app: app, window: window)
     }
 }

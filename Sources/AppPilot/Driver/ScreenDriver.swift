@@ -4,7 +4,7 @@ import CoreGraphics
 // MARK: - Screen Driver Protocol (simplified for new design)
 
 public protocol ScreenDriver: Sendable {
-    func captureWindow(_ windowID: WindowID) async throws -> CGImage
+    func captureWindow(_ windowHandle: WindowHandle) async throws -> CGImage
     func captureScreen() async throws -> CGImage
 }
 
@@ -14,10 +14,10 @@ public actor DefaultScreenDriver: ScreenDriver {
     
     public init() {}
     
-    public func captureWindow(_ windowID: WindowID) async throws -> CGImage {
+    public func captureWindow(_ windowHandle: WindowHandle) async throws -> CGImage {
         // TODO: Implement ScreenCaptureKit for macOS 15+ window capture
         // This implementation uses a placeholder image for development
-        print("⚠️ ScreenCaptureKit implementation needed for window \(windowID.id)")
+        print("⚠️ ScreenCaptureKit implementation needed for window \(windowHandle.id)")
         
         // Return a placeholder 1x1 pixel image
         let colorSpace = CGColorSpaceCreateDeviceRGB()
