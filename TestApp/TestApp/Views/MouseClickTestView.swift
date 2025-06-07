@@ -60,7 +60,10 @@ struct MouseClickTestView: View {
             .padding()
         }
         .onAppear {
-            // Targets are initialized by testStateManager
+            // Initialize targets if not already done
+            if testStateManager.clickTargets.isEmpty {
+                testStateManager.initializeClickTargets()
+            }
             // Connect testResultsManager to testStateManager for external click recording
             testStateManager.testResultsManager = testResultsManager
             setupEventMonitoring()
@@ -188,42 +191,54 @@ struct MouseClickTestView: View {
     
     private var testArea: some View {
         ZStack {
-            // Background
-            Rectangle()
-                .fill(Color.clear)
-                .contentShape(Rectangle())
-                .onTapGesture { location in
-                    handleAreaClick(at: location)
-                }
-            
-            // Click targets
-            ForEach(testStateManager.clickTargets, id: \.id) { target in
-                Circle()
-                    .fill(target.isClicked ? Color.green : Color.red)
-                    .frame(width: targetSize, height: targetSize)
-                    .position(target.position)
-                    .overlay(
-                        Circle()
-                            .stroke(Color.black, lineWidth: 2)
-                            .position(target.position)
-                    )
-                    .overlay(
-                        Text(target.label)
-                            .font(.caption)
-                            .fontWeight(.bold)
-                            .foregroundColor(.white)
-                            .position(target.position)
-                    )
-                    .onTapGesture {
-                        handleTargetClick(targetId: target.id)
-                    }
-            }
-            
-            // Coordinate grid (optional)
+            backgroundArea
+            targetElements
             if showCoordinates {
                 coordinateGrid
             }
         }
+    }
+    
+    private var backgroundArea: some View {
+        Rectangle()
+            .fill(Color.clear)
+            .contentShape(Rectangle())
+            .onTapGesture { location in
+                handleAreaClick(at: location)
+            }
+    }
+    
+    private var targetElements: some View {
+        ForEach(testStateManager.clickTargets, id: \.id) { target in
+            targetView(for: target)
+        }
+    }
+    
+    private func targetView(for target: TestStateManager.ClickTargetState) -> some View {
+        ZStack {
+            Circle()
+                .fill(target.isClicked ? Color.green : Color.red)
+                .frame(width: targetSize, height: targetSize)
+            
+            Circle()
+                .stroke(Color.black, lineWidth: 2)
+                .frame(width: targetSize, height: targetSize)
+            
+            Text(target.label)
+                .font(.caption)
+                .fontWeight(.bold)
+                .foregroundColor(.white)
+        }
+        .position(target.position)
+        .onTapGesture {
+            handleTargetClick(targetId: target.id)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits([.isButton])
+        .accessibilityLabel("Click target \(target.label)")
+        .accessibilityIdentifier("click_target_\(target.id)")
+        .accessibilityValue(target.isClicked ? "clicked" : "unclicked")
+        .accessibilityHint("Tap to register a click on this target")
     }
     
     private var coordinateGrid: some View {
@@ -293,21 +308,53 @@ struct MouseClickTestView: View {
     }
     
     private func setupEventMonitoring(testAreaGlobalFrame: CGRect? = nil) {
-        // Get the current window frame
-        if let window = NSApplication.shared.windows.first(where: { $0.isKeyWindow }) {
-            let windowFrame = window.frame
-            let testAreaFrame = testAreaGlobalFrame ?? CGRect(x: 0, y: 0, width: testAreaSize, height: testAreaSize)
+        // Delay to ensure window is ready
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
             
-            print("🖱️ Setting up event monitoring for test area")
-            print("   Window frame: \(windowFrame)")
-            print("   Test area frame: \(testAreaFrame)")
+            // Try multiple methods to find the window
+            var targetWindow: NSWindow?
             
-            testStateManager.startMouseEventMonitoring(
-                testAreaFrame: testAreaFrame,
-                windowFrame: windowFrame
-            )
-        } else {
-            print("⚠️ Could not find key window for event monitoring")
+            // Method 1: Find window containing the test app
+            if let window = NSApplication.shared.windows.first(where: { window in
+                window.isVisible && window.title.contains("TestApp")
+            }) {
+                targetWindow = window
+                print("✅ Found window by title: \(window.title)")
+            }
+            // Method 2: Find the main window
+            else if let window = NSApplication.shared.windows.first(where: { $0.isMainWindow }) {
+                targetWindow = window
+                print("✅ Found main window")
+            }
+            // Method 3: Find any visible window
+            else if let window = NSApplication.shared.windows.first(where: { $0.isVisible }) {
+                targetWindow = window
+                print("✅ Found visible window")
+            }
+            
+            if let window = targetWindow {
+                let windowFrame = window.frame
+                let testAreaFrame = testAreaGlobalFrame ?? CGRect(x: 0, y: 0, width: testAreaSize, height: testAreaSize)
+                
+                print("🖱️ Setting up event monitoring for test area")
+                print("   Window: \(window.title.isEmpty ? "(untitled)" : window.title)")
+                print("   Window frame: \(windowFrame)")
+                print("   Test area frame: \(testAreaFrame)")
+                print("   Window visible: \(window.isVisible)")
+                print("   Window key: \(window.isKeyWindow)")
+                print("   Window main: \(window.isMainWindow)")
+                
+                testStateManager.startMouseEventMonitoring(
+                    testAreaFrame: testAreaFrame,
+                    windowFrame: windowFrame
+                )
+            } else {
+                print("⚠️ Could not find any window for event monitoring")
+                print("   Available windows: \(NSApplication.shared.windows.count)")
+                for (index, window) in NSApplication.shared.windows.enumerated() {
+                    print("   Window \(index): title='\(window.title)', visible=\(window.isVisible), key=\(window.isKeyWindow)")
+                }
+            }
         }
     }
     

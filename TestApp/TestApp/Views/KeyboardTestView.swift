@@ -45,6 +45,7 @@ struct KeyboardTestView: View {
                 .font(.headline)
             
             Toggle("Use Custom Input", isOn: $useCustomInput)
+                .accessibilityIdentifier("use_custom_input_toggle")
             
             if useCustomInput {
                 VStack(alignment: .leading, spacing: 8) {

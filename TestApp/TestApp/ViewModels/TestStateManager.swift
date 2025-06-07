@@ -138,14 +138,21 @@ class TestStateManager {
         
         stopMouseEventMonitoring() // Stop any existing monitor
         
-        // Monitor mouse clicks using NSEvent
+        // Monitor mouse clicks using NSEvent - both global and local monitors
         mouseEventMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] event in
             self?.handleGlobalMouseClick(event: event)
+        }
+        
+        // Also add local monitor for events within our app
+        let localMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] event in
+            self?.handleGlobalMouseClick(event: event)
+            return event
         }
         
         print("✅ Mouse event monitoring started")
         print("   Test area frame: \(testAreaFrame)")
         print("   Window frame: \(windowFrame)")
+        print("   Monitor ID: \(String(describing: mouseEventMonitor))")
     }
     
     func stopMouseEventMonitoring() {
@@ -210,12 +217,12 @@ class TestStateManager {
         let testAreaY = windowY - testAreaFrame.minY
         
         print("🔄 Coordinate conversion:")
-        print("   Screen: (%.1f, %.1f)", screenLocation.x, screenLocation.y)
-        print("   Screen height: %.1f", screenHeight)
+        print("   Screen: (\(String(format: "%.1f", screenLocation.x)), \(String(format: "%.1f", screenLocation.y)))")
+        print("   Screen height: \(String(format: "%.1f", screenHeight))")
         print("   Window frame: \(testAreaWindowFrame)")
         print("   Test area frame: \(testAreaFrame)")
-        print("   Window coords: (%.1f, %.1f)", windowX, windowY)
-        print("   Test area coords: (%.1f, %.1f)", testAreaX, testAreaY)
+        print("   Window coords: (\(String(format: "%.1f", windowX)), \(String(format: "%.1f", windowY)))")
+        print("   Test area coords: (\(String(format: "%.1f", testAreaX)), \(String(format: "%.1f", testAreaY)))")
         
         return CGPoint(x: testAreaX, y: testAreaY)
     }

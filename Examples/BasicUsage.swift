@@ -1,15 +1,15 @@
 import Foundation
 import AppPilot
 
-// MARK: - AppPilot v2.0 Basic Usage Example
+// MARK: - AppPilot v3.0 Basic Usage Example
 
 @main
 struct BasicUsageExample {
     static func main() async {
-        print("🚀 AppPilot v2.0 - Basic Usage Example")
+        print("🚀 AppPilot v3.0 - UI Element-Based Automation Example")
         
         do {
-            // Initialize AppPilot with default drivers
+            // Initialize AppPilot
             let pilot = AppPilot()
             
             // 1. List all running applications
@@ -17,7 +17,7 @@ struct BasicUsageExample {
             let apps = try await pilot.listApplications()
             print("Found \(apps.count) applications:")
             for app in apps.prefix(5) {
-                print("  - \(app.name) (PID: \(app.id.pid))")
+                print("  - \(app.name) (ID: \(app.id))")
             }
             
             // 2. Find a target application (e.g., Finder)
@@ -36,45 +36,59 @@ struct BasicUsageExample {
                 print("  - \(window.title ?? "Untitled") (\(window.bounds))")
             }
             
-            // 4. Get window bounds for coordinate conversion
+            // 4. Discover UI elements in the first window
             if let firstWindow = windows.first {
-                print("\n📐 Getting window bounds...")
-                let bounds = try await pilot.getWindowBounds(window: firstWindow.id)
-                print("Window bounds: \(bounds)")
+                print("\n🔍 Discovering UI elements...")
+                let elements = try await pilot.findElements(in: firstWindow.id)
+                print("Found \(elements.count) UI elements:")
+                for element in elements.prefix(10) {
+                    print("  - \(element.role): \(element.title ?? element.identifier ?? "No title") at \(element.bounds)")
+                }
                 
-                // 5. Convert window-relative coordinates to screen coordinates
-                let windowRelativePoint = Point(x: 50.0, y: 50.0)
-                let screenPoint = try await pilot.windowToScreen(point: windowRelativePoint, window: firstWindow.id)
-                print("Window point \(windowRelativePoint) → Screen point \(screenPoint)")
+                // 5. Find specific buttons
+                print("\n🔘 Looking for buttons...")
+                let buttons = try await pilot.findElements(in: firstWindow.id, role: .button)
+                print("Found \(buttons.count) buttons:")
+                for button in buttons.prefix(5) {
+                    print("  - Button: \(button.title ?? "Untitled") at \(button.centerPoint)")
+                }
                 
-                // 6. Simulate a click (this would actually move the cursor!)
-                print("\n🖱️ Simulating click at screen coordinates...")
-                print("⚠️ This would actually click at (\(screenPoint.x), \(screenPoint.y))")
-                // Uncomment the next line to actually perform the click:
-                // let result = try await pilot.click(at: screenPoint)
-                // print("Click result: \(result)")
+                // 6. Element-based click (if we found any buttons)
+                if let firstButton = buttons.first {
+                    print("\n🖱️ Element-based click example...")
+                    print("⚠️ This would click button: \(firstButton.title ?? "Untitled")")
+                    // Uncomment to actually click:
+                    // let result = try await pilot.clickElement(firstButton, in: firstWindow.id)
+                    // print("Click result: \(result)")
+                }
+                
+                // 7. Smart element discovery
+                print("\n🎯 Smart element discovery...")
+                if let closeButton = try? await pilot.findButton(in: firstWindow.id, title: "Close") {
+                    print("Found Close button at: \(closeButton.centerPoint)")
+                }
             }
             
-            // 7. Simulate typing (this would actually type!)
-            print("\n⌨️ Simulating typing...")
-            print("⚠️ This would actually type 'Hello AppPilot v2.0!'")
-            // Uncomment the next line to actually type:
-            // let typeResult = try await pilot.type(text: "Hello AppPilot v2.0!")
+            // 8. Type text example
+            print("\n⌨️ Text input example...")
+            print("⚠️ This would type 'Hello AppPilot v3.0!'")
+            // Uncomment to actually type:
+            // let typeResult = try await pilot.type(text: "Hello AppPilot v3.0!")
             // print("Type result: \(typeResult)")
             
-            // 8. Wait example
+            // 9. Wait example
             print("\n⏰ Waiting for 1 second...")
             try await pilot.wait(.time(seconds: 1.0))
             print("Wait completed!")
             
-            // 9. Capture window screenshot
+            // 10. Capture window screenshot
             if let firstWindow = windows.first {
                 print("\n📷 Capturing window screenshot...")
                 let image = try await pilot.capture(window: firstWindow.id)
                 print("Screenshot captured: \(image.width)x\(image.height) pixels")
             }
             
-            print("\n✅ AppPilot v2.0 basic usage example completed!")
+            print("\n✅ AppPilot v3.0 element-based automation example completed!")
             
         } catch {
             print("❌ Error: \(error)")

@@ -1,6 +1,22 @@
 import Foundation
 import SwiftUI
 
+// MARK: - Input Types
+
+enum MouseButton: String, CaseIterable {
+    case left = "Left"
+    case right = "Right"
+    case center = "Center"
+    
+    var systemImage: String {
+        switch self {
+        case .left: return "cursorarrow.click"
+        case .right: return "cursorarrow.click.2"
+        case .center: return "cursorarrow.click.badge.clock"
+        }
+    }
+}
+
 // MARK: - Test Result Models
 
 struct TestResult: Identifiable, Codable {
@@ -63,20 +79,6 @@ enum TestType: String, CaseIterable, Codable {
 }
 
 // MARK: - Mouse Click Test Models
-
-enum MouseButton: String, CaseIterable {
-    case left = "Left"
-    case right = "Right"
-    case center = "Center"
-    
-    var systemImage: String {
-        switch self {
-        case .left: return "hand.point.up.left"
-        case .right: return "hand.point.up.right"
-        case .center: return "hand.point.up"
-        }
-    }
-}
 
 struct ClickTarget: Identifiable {
     let id = UUID()
