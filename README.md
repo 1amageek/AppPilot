@@ -11,14 +11,16 @@ AppPilot is a modern Swift Package Manager library that provides intelligent UI 
 
 ## 🌟 Features
 
-- **🎯 Smart Element Discovery**: Find UI elements by role, title, and identifier
+- **🎯 Smart Element Discovery**: Find UI elements by role, title, and identifier using Accessibility API
 - **🖱️ Element-Based Actions**: Click buttons, fill text fields, and interact with UI components
 - **🔍 Automatic Coordinate Calculation**: No need to manually calculate button centers
 - **🚀 Universal Compatibility**: Works with SwiftUI, AppKit, Electron, and web applications
 - **⏰ Intelligent Waiting**: Wait for elements to appear or conditions to be met
-- **📷 Screen Capture**: Take screenshots of windows and UI elements
+- **📷 Screen Capture**: Take screenshots of windows and applications using ScreenCaptureKit
+- **🌐 Input Source Management**: Multi-language text input with automatic input source switching
 - **🔄 Graceful Fallback**: Coordinate-based automation when element detection fails
-- **🛡️ Type Safety**: Built with Swift 6.1 and modern concurrency
+- **🛡️ Type Safety**: Built with Swift 6.1 and modern concurrency (Actor-based design)
+- **🧪 Comprehensive Testing**: Swift Testing framework with dedicated TestApp integration
 
 ## 🏗️ Architecture
 
@@ -142,43 +144,93 @@ try await pilot.wait(.elementDisappear(window: window, role: .button, title: "Lo
 
 ## 🧪 Testing
 
-AppPilot includes a comprehensive test suite using Swift Testing framework:
+AppPilot uses Swift Testing framework with comprehensive test coverage:
 
 ```bash
 # Run all tests
 swift test
 
 # Run specific test categories
-swift test --filter ".unit"
-swift test --filter ".integration"
+swift test --filter ".unit"           # Unit tests
+swift test --filter ".integration"    # Integration tests with TestApp
+swift test --filter ".mouseClick"     # Mouse click accuracy tests
+swift test --filter ".keyboard"       # Keyboard input tests
 
-# Run with specific test
+# Run specific tests
 swift test --filter "testElementDiscovery"
+swift test --filter "CorrectTestFlowTests"
 
 # Build the project
 swift build
+
+# Clean build artifacts
+swift package clean
 ```
 
-### TestApp Integration
+### TestApp Integration Testing
 
-The project includes a dedicated TestApp for comprehensive automation testing:
+The project includes a dedicated TestApp for comprehensive automation validation following the **「見る」「理解する」「アクション」** (See, Understand, Action) pattern:
 
 ```swift
-@Test("Element-based TestApp automation")
+@Test("Complete TestApp integration test")
 func testTestAppIntegration() async throws {
     let pilot = AppPilot()
+    
+    // Stage 1: 見る (See/Observe) - Application & UI Discovery
     let testApp = try await pilot.findApplication(name: "TestApp")
     let window = try await pilot.findWindow(app: testApp, title: "Mouse Click")
     
-    // Discover all clickable targets
-    let buttons = try await pilot.findElements(in: window, role: .button)
+    // Stage 2: 理解する (Understand) - Element Analysis
+    let allElements = try await pilot.findElements(in: window)
+    let clickTargets = allElements.filter { $0.role == .button }
     
-    // Click each target and verify via API
-    for button in buttons {
-        try await pilot.click(element: button)
-        // Verify through TestApp's REST API
-        let state = try await testAppAPI.getClickTargets()
-        #expect(state.filter { $0.clicked }.count > 0)
+    #expect(clickTargets.count >= 5, "Should find at least 5 click targets")
+    
+    // Stage 3: アクション (Action) - Element-based Automation
+    let testSession = try await TestSession.create(pilot: pilot, testType: .mouseClick)
+    await testSession.resetState()
+    
+    for target in clickTargets {
+        let beforeState = await testSession.getClickTargets()
+        let beforeCount = beforeState.filter { $0.clicked }.count
+        
+        // Perform element-based click
+        let result = try await pilot.click(element: target)
+        #expect(result.success, "Click should succeed for \(target.title ?? target.id)")
+        
+        try await pilot.wait(.time(seconds: 0.5))
+        
+        // Verify via TestApp API
+        let afterState = await testSession.getClickTargets()
+        let afterCount = afterState.filter { $0.clicked }.count
+        
+        #expect(afterCount > beforeCount, "TestApp should detect click on \(target.title ?? target.id)")
+    }
+}
+
+@Test("Input source management test")
+func testInputSourceManagement() async throws {
+    let pilot = AppPilot()
+    
+    // Test current input source
+    let currentSource = try await pilot.getCurrentInputSource()
+    #expect(!currentSource.identifier.isEmpty)
+    
+    // Test available sources
+    let sources = try await pilot.getAvailableInputSources()
+    #expect(sources.count > 0)
+    
+    // Test text input with different sources
+    let testApp = try await pilot.findApplication(name: "TestApp")
+    let window = try await pilot.findWindow(app: testApp, title: "Keyboard")
+    let textField = try await pilot.findTextField(in: window)
+    
+    // Type with English input
+    try await pilot.type(text: "Hello", into: textField, inputSource: .english)
+    
+    // Type with Japanese input (if available)
+    if sources.contains(where: { $0.identifier.contains("Japanese") }) {
+        try await pilot.type(text: "こんにちは", into: textField, inputSource: .japanese)
     }
 }
 ```
@@ -205,6 +257,59 @@ For sandboxed applications, add these entitlements:
 <key>com.apple.security.automation.apple-events</key>
 <true/>
 ```
+
+## 🎯 Supported Operations
+
+AppPilot 1.0 provides a comprehensive set of automation operations:
+
+### Element Discovery Operations
+- `findElements(in:role:title:identifier:)` - Find UI elements with flexible criteria
+- `findElement(in:role:title:)` - Find single UI element
+- `findButton(in:title:)` - Find button by title
+- `findTextField(in:placeholder:)` - Find text input field
+- `findClickableElements(in:)` - Find all clickable elements
+- `findTextInputElements(in:)` - Find all text input elements
+
+### Element-Based Actions
+- `click(element:)` - Click UI element at its center point
+- `type(text:into:)` - Type text into UI element
+- `type(text:into:inputSource:)` - Type with specific input source
+- `getValue(from:)` - Get value from UI element
+- `elementExists(_:)` - Check if element is still valid
+
+### Wait Operations  
+- `wait(.time(seconds:))` - Wait for specific duration
+- `wait(.elementAppear(window:role:title:))` - Wait for element to appear
+- `wait(.elementDisappear(window:role:title:))` - Wait for element to disappear
+- `wait(.uiChange(window:timeout:))` - Wait for UI changes
+- `waitForElement(in:role:title:timeout:)` - Wait for specific element
+
+### Input Source Management
+- `getCurrentInputSource()` - Get current keyboard layout
+- `getAvailableInputSources()` - List all available input sources
+- `switchInputSource(to:)` - Change keyboard layout
+- `type(_:inputSource:)` - Type with specific input source (fallback)
+
+### Screen Capture
+- `capture(window:)` - Capture window screenshot
+- `ScreenCaptureUtility.convertToPNG(_:)` - Convert to PNG data
+- `ScreenCaptureUtility.convertToJPEG(_:quality:)` - Convert to JPEG data
+- `ScreenCaptureUtility.saveToFile(_:path:format:)` - Save image to file
+
+### Fallback Coordinate Operations
+- `click(window:at:button:count:)` - Click at coordinates with app focus
+- `click(at:button:count:)` - Legacy coordinate click (no focus management)
+- `type(text:)` - Type to focused app (fallback)
+- `gesture(from:to:duration:)` - Drag gesture between points
+- `drag(from:to:duration:)` - Legacy drag operation
+
+### Application & Window Management
+- `listApplications()` - Get all running applications
+- `findApplication(bundleId:)` - Find app by bundle ID
+- `findApplication(name:)` - Find app by name
+- `listWindows(app:)` - Get windows for application
+- `findWindow(app:title:)` - Find window by title
+- `findWindow(app:index:)` - Find window by index
 
 ## 📚 API Reference
 
@@ -259,18 +364,67 @@ let value = try await pilot.getValue(from: textField)
 let exists = try await pilot.elementExists(button)
 ```
 
+### Input Source Management
+
+```swift
+// Get current input source
+let currentSource = try await pilot.getCurrentInputSource()
+print("Current: \(currentSource.displayName)")
+
+// List available input sources
+let sources = try await pilot.getAvailableInputSources()
+for source in sources {
+    print("\(source.displayName): \(source.identifier)")
+}
+
+// Switch input source and type
+try await pilot.switchInputSource(to: .japanese)
+try await pilot.type(text: "こんにちは", into: textField)
+```
+
 ### Screen Capture
 
 ```swift
 // Capture window screenshot
 let image = try await pilot.capture(window: window)
 
-// Save to file
-let url = URL(fileURLWithPath: "/tmp/screenshot.png")
-try image.savePNG(to: url)
+// Convert to PNG data and save
+if let pngData = ScreenCaptureUtility.convertToPNG(image) {
+    let url = URL(fileURLWithPath: "/tmp/screenshot.png")
+    try pngData.write(to: url)
+}
 ```
 
 ## 📋 Examples
+
+### Complete TestApp Automation
+
+```swift
+import AppPilot
+
+let pilot = AppPilot()
+
+// Find TestApp
+let testApp = try await pilot.findApplication(name: "TestApp")
+let window = try await pilot.findWindow(app: testApp, title: "Mouse Click")
+
+// Discover all clickable targets automatically
+let buttons = try await pilot.findElements(in: window, role: .button)
+print("Found \(buttons.count) clickable targets")
+
+// Click each target using element-based automation
+for button in buttons where button.isEnabled {
+    print("Clicking: \(button.title ?? button.id)")
+    try await pilot.click(element: button)
+    
+    // Verify via TestApp API
+    let response = try await testAppAPI.getClickTargets()
+    let clickedCount = response.filter { $0.clicked }.count
+    print("Targets clicked: \(clickedCount)")
+    
+    try await pilot.wait(.time(seconds: 0.5))
+}
+```
 
 ### Weather App City Search
 
@@ -296,26 +450,26 @@ let tokyoResult = try await pilot.waitForElement(
 try await pilot.click(element: tokyoResult)
 ```
 
-### Safari Web Automation
+### Multi-Language Text Input
 
 ```swift
 let pilot = AppPilot()
 
-// Find Safari
-let safari = try await pilot.findApplication(bundleId: "com.apple.Safari")
-let window = try await pilot.findWindow(app: safari, index: 0)
+// Find text editing app
+let textEdit = try await pilot.findApplication(name: "TextEdit")
+let window = try await pilot.findWindow(app: textEdit, index: 0)
 
-// Navigate to website
-let addressBar = try await pilot.findTextField(in: window, identifier: "address_bar")
-try await pilot.click(element: addressBar)
-try await pilot.type(text: "https://example.com", into: addressBar)
+// Find text area and type in different languages
+let textArea = try await pilot.findTextField(in: window)
 
-// Press Enter
-try await pilot.type(text: "\r")
+// Type in English
+try await pilot.type(text: "Hello World", into: textArea, inputSource: .english)
 
-// Wait for page to load and find elements
-try await pilot.wait(.time(seconds: 3.0))
-let links = try await pilot.findElements(in: window, role: .link)
+// Switch to Japanese and type
+try await pilot.type(text: "こんにちは世界", into: textArea, inputSource: .japanese)
+
+// Type mixed content
+try await pilot.type(text: "\nMixed: English + 日本語", into: textArea)
 ```
 
 ## 🐛 Error Handling
@@ -350,24 +504,61 @@ do {
 }
 ```
 
-## 🔄 Migration from v2.0
+## 🔄 Migration Guide
 
-### Key Changes
+### Key Changes in 1.0
 
-- **Element-First Approach**: UI elements are now discovered before actions
+- **Element-First Approach**: UI elements are discovered before actions
 - **Smart Targeting**: Find elements by semantic properties, not coordinates
 - **Automatic Coordinate Calculation**: No manual coordinate math required
 - **Better Error Messages**: Descriptive errors about missing elements
+- **Input Source Management**: Built-in support for multi-language input
+- **Enhanced Wait Operations**: Wait for specific UI element conditions
+- **Improved Testing**: Swift Testing framework with TestApp integration
 
-### Migration Example
+### Migration Examples
 
+#### Basic Click Operations
 ```swift
-// v2.0: Coordinate-based
+// v2.0: Hardcoded coordinate clicking
 try await pilot.click(window: window, at: Point(x: 534, y: 228))
 
-// v3.0: Element-based
+// 1.0: Smart element discovery and clicking
 let button = try await pilot.findButton(in: window, title: "Submit")
 try await pilot.click(element: button)
+```
+
+#### Text Input
+```swift
+// v2.0: Focus app and type blindly
+try await pilot.type(text: "Hello World")
+
+// 1.0: Find text field and type into it
+let textField = try await pilot.findTextField(in: window)
+try await pilot.type(text: "Hello World", into: textField)
+```
+
+#### Element Discovery
+```swift
+// v2.0: No element discovery, manual coordinate calculation
+let buttonCenter = Point(x: 200, y: 150)
+try await pilot.click(window: window, at: buttonCenter)
+
+// 1.0: Automatic element discovery and interaction
+let allButtons = try await pilot.findElements(in: window, role: .button)
+for button in allButtons where button.isEnabled {
+    try await pilot.click(element: button)  // Automatically uses element.centerPoint
+}
+```
+
+#### Wait Operations
+```swift
+// v2.0: Fixed time waits
+try await Task.sleep(nanoseconds: 2_000_000_000)
+
+// 1.0: Semantic wait conditions
+try await pilot.waitForElement(in: window, role: .button, title: "Continue", timeout: 10.0)
+try await pilot.wait(.elementDisappear(window: window, role: .dialog, title: "Loading"))
 ```
 
 ## 🤝 Contributing
@@ -391,4 +582,4 @@ AppPilot is available under the MIT license. See LICENSE file for details.
 
 ---
 
-**AppPilot v3.0** - Intelligent UI automation for the modern Mac
+**AppPilot 1.0** - Intelligent UI automation for the modern Mac

@@ -92,11 +92,11 @@ This is a Swift Package Manager (SPM) library project named "AppPilot" targeting
 
 The project uses the new Swift Testing framework with `@Test` macro annotations instead of the traditional XCTest framework.
 
-## AppPilot v3.0 - UI Element-Based Automation SDK
+## AppPilot 1.0 - UI Element-Based Automation SDK
 
 ### Overview
 
-AppPilot v3.0 is a macOS automation SDK that combines **UI element detection** with **reliable automation**. It automatically discovers UI elements using Accessibility APIs and performs smart, element-based operations instead of blind coordinate clicking.
+AppPilot 1.0 is a macOS automation SDK that combines **UI element detection** with **reliable automation**. It automatically discovers UI elements using Accessibility APIs and performs smart, element-based operations instead of blind coordinate clicking.
 
 ### Core Design Philosophy
 
@@ -741,7 +741,7 @@ try await pilot.click(window: window, at: Point(x: 534, y: 228)) // Hope this hi
 To this:
 
 ```swift
-// v3.0: Smart element discovery
+// 1.0: Smart element discovery
 let buttons = try await pilot.findElements(in: window, role: .button)
 for button in buttons {
     try await pilot.click(element: button) // Always hits the right target
