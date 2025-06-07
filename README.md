@@ -1,267 +1,394 @@
-# 🚁 AppPilot
+# AppPilot
 
-> **Elite macOS Automation SDK**  
-> Control any macOS application from the shadows — no windows, no focus, no limits.
+**UI Element-Based macOS Automation SDK**
+
+AppPilot is a modern Swift Package Manager library that provides intelligent UI automation for macOS applications. Instead of relying on brittle coordinate-based automation, AppPilot discovers actual UI elements using Accessibility APIs and performs smart, element-based operations.
 
 [![Swift 6.1+](https://img.shields.io/badge/Swift-6.1+-orange.svg)](https://swift.org)
 [![macOS 15+](https://img.shields.io/badge/macOS-15+-blue.svg)](https://developer.apple.com/macos/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Swift Package Manager](https://img.shields.io/badge/SPM-compatible-brightgreen.svg)](https://swift.org/package-manager/)
 
-## ✨ What Makes AppPilot Special
+## 🌟 Features
 
-AppPilot isn't just another automation framework — it's a **stealth operations SDK** that gives you unprecedented control over macOS applications, even when they're minimized, hidden, or running in different Mission Control Spaces.
+- **🎯 Smart Element Discovery**: Find UI elements by role, title, and identifier
+- **🖱️ Element-Based Actions**: Click buttons, fill text fields, and interact with UI components
+- **🔍 Automatic Coordinate Calculation**: No need to manually calculate button centers
+- **🚀 Universal Compatibility**: Works with SwiftUI, AppKit, Electron, and web applications
+- **⏰ Intelligent Waiting**: Wait for elements to appear or conditions to be met
+- **📷 Screen Capture**: Take screenshots of windows and UI elements
+- **🔄 Graceful Fallback**: Coordinate-based automation when element detection fails
+- **🛡️ Type Safety**: Built with Swift 6.1 and modern concurrency
 
-### 🎯 Core Superpowers
-
-- **🥷 Background Operations**: Control apps without bringing them to the foreground
-- **🎛️ Three-Layer Command Strategy**: AppleEvent → Accessibility → UI Events with smart fallback
-- **🌌 Space-Aware**: Works seamlessly across Mission Control Spaces
-- **⚡ Live UI Monitoring**: Real-time UI change notifications via AsyncStream
-- **🎭 Visibility Orchestration**: Temporary window management with pixel-perfect restoration
-- **🛡️ Minimal Permissions**: Operates with the least required system access
-
-### 🏗️ Architecture at a Glance
+## 🏗️ Architecture
 
 ```
-┌─────────────── 🎯 Pilot / Facade ───────────────┐
-│      AppPilot (actor)                            │
-│  ├─ CommandRouter   ← Three-layer strategy      │
-│  ├─ VisibilityMgr   (minimize/Space control)    │
-│  ├─ SpaceController (MissionControl Driver)     │
-│  └─ LiveAXHub       (AXObserver → AsyncStream)  │
-└──────────┬──────────┬──────────┬────────────────┘
-           ▼          ▼          ▼
-    🎯 Domain    🌉 Bridge   🚗 Drivers   📦 Support
-   Commands     Coordinates  AX/Event/MC    Types
+┌─────────────── AppPilot (Actor) ───────────────┐
+│  • UI Element discovery and automation          │
+│  • Smart element-based actions                 │
+│  • Automatic coordinate conversion             │
+│  • Application and window management           │
+└─────────────────────────────────────────────────┘
+               │
+    ┌──────────┼──────────┐
+    ▼          ▼          ▼
+┌──────────┐ ┌──────────┐ ┌──────────────┐
+│ Element  │ │ CGEvent  │ │ Accessibility│
+│ Finder   │ │ Driver   │ │ Driver       │
+│          │ │          │ │              │
+│ AX Tree  │ │ Mouse &  │ │ Element      │
+│ Parser   │ │ Keyboard │ │ Detection    │
+└──────────┘ └──────────┘ └──────────────┘
 ```
 
-## 🚀 Quick Start
+## 🔧 Requirements
 
-### Installation
+- macOS 15.0+
+- Swift 6.1+
+- Xcode 16.0+
+- **Accessibility Permission** (System Preferences → Security & Privacy → Accessibility)
 
-Add AppPilot to your Swift package:
+## 📦 Installation
+
+### Swift Package Manager
+
+Add AppPilot to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/yourusername/AppPilot.git", from: "1.0.0")
+    .package(url: "https://github.com/your-username/AppPilot.git", from: "3.0.0")
 ]
 ```
 
-### Basic Usage
+Or add it via Xcode:
+1. File → Add Package Dependencies
+2. Enter the repository URL
+3. Select your target and add the package
+
+## 🚀 Quick Start
 
 ```swift
 import AppPilot
 
 let pilot = AppPilot()
 
-// 🔍 Discover applications and windows
-let apps = try await pilot.listApplications()
-let windows = try await pilot.listWindows(in: apps.first!.id)
+// Find an application
+let app = try await pilot.findApplication(name: "Calculator")
+let window = try await pilot.findWindow(app: app, index: 0)
 
-// 🖱️ Click without bringing window to front
-let result = try await pilot.click(
-    window: windows.first!.id,
-    at: Point(x: 100, y: 200),
-    policy: .STAY_HIDDEN  // 🥷 Stealth mode
+// Discover UI elements
+let buttons = try await pilot.findElements(in: window, role: .button)
+let numberFive = try await pilot.findButton(in: window, title: "5")
+
+// Perform element-based actions
+try await pilot.click(element: numberFive)
+try await pilot.click(element: try await pilot.findButton(in: window, title: "+"))
+try await pilot.click(element: try await pilot.findButton(in: window, title: "3"))
+try await pilot.click(element: try await pilot.findButton(in: window, title: "="))
+```
+
+## 📖 Core Concepts
+
+### Element-Based Automation
+
+AppPilot prioritizes finding actual UI elements over blind coordinate clicking:
+
+```swift
+// ❌ Old approach: Hardcoded coordinates
+try await pilot.click(window: window, at: Point(x: 200, y: 300))
+
+// ✅ New approach: Smart element discovery
+let submitButton = try await pilot.findButton(in: window, title: "Submit")
+try await pilot.click(element: submitButton)
+```
+
+### Smart Element Discovery
+
+Find elements using semantic properties:
+
+```swift
+// Find by role and title
+let saveButton = try await pilot.findElement(in: window, role: .button, title: "Save")
+
+// Find by identifier
+let searchField = try await pilot.findElements(in: window, identifier: "search_input")
+
+// Find all buttons
+let allButtons = try await pilot.findElements(in: window, role: .button)
+
+// Find text fields
+let textField = try await pilot.findTextField(in: window)
+```
+
+### Wait Operations
+
+Wait for UI changes and conditions:
+
+```swift
+// Wait for element to appear
+let loadingComplete = try await pilot.waitForElement(
+    in: window,
+    role: .staticText,
+    title: "Loading complete",
+    timeout: 10.0
 )
 
-// ⌨️ Type text in background
-try await pilot.type(
-    text: "Hello from the shadows!",
-    into: windows.first!.id,
-    policy: .STAY_HIDDEN
-)
+// Wait for specific time
+try await pilot.wait(.time(seconds: 2.0))
 
-// 👀 Monitor UI changes in real-time
-for await event in pilot.subscribeAX(window: windows.first!.id) {
-    print("UI changed: \(event.type) at \(event.timestamp)")
-}
+// Wait for element to disappear
+try await pilot.wait(.elementDisappear(window: window, role: .button, title: "Loading..."))
 ```
 
-## 🎯 Core Concepts
+## 🧪 Testing
 
-### Command Policies
-
-Control how AppPilot interacts with target applications:
-
-```swift
-public enum Policy {
-    case STAY_HIDDEN                           // 🥷 Operate in stealth
-    case UNMINIMIZE(tempMs: Int = 150)        // 📱 Briefly unminimize
-    case BRING_FORE_TEMP(restore: AppID)      // 🔄 Temporary focus
-}
-```
-
-### Smart Route Selection
-
-AppPilot automatically chooses the best approach for each command:
-
-```swift
-public enum Route {
-    case APPLE_EVENT  // 📨 High-level scripting
-    case AX_ACTION    // ♿ Accessibility API
-    case UI_EVENT     // 🖱️ Low-level events
-}
-```
-
-### Wait Specifications
-
-Precise timing control for complex automation workflows:
-
-```swift
-public enum WaitSpec {
-    case time(ms: Int)                                    // ⏱️ Simple delay
-    case ui_change(window: WindowID, timeoutMs: Int)     // 🎯 Event-driven
-}
-```
-
-## 🧪 Testing Framework
-
-AppPilot uses **Swift Testing** (Swift 6 native) for comprehensive test coverage:
+AppPilot includes a comprehensive test suite using Swift Testing framework:
 
 ```bash
 # Run all tests
 swift test
 
-# Run specific test suites
+# Run specific test categories
 swift test --filter ".unit"
 swift test --filter ".integration"
+
+# Run with specific test
+swift test --filter "testElementDiscovery"
 
 # Build the project
 swift build
 ```
 
-### Test Architecture
+### TestApp Integration
 
-- **Unit Tests**: Mock drivers with 100% coverage
-- **Integration Tests**: Real macOS API testing with TestApp
-- **Stress Tests**: 1-hour endurance testing
-- **Performance Tests**: <10ms response time validation
+The project includes a dedicated TestApp for comprehensive automation testing:
 
-## 🛠️ Development Setup
-
-### Prerequisites
-
-- **macOS**: Ventura 13.6+ or Sonoma 14.2+
-- **Xcode**: 15.2+ with Swift 6.1 toolchain
-- **Hardware**: Apple Silicon (M1/M2) recommended
-
-### Required Permissions
-
-Add these entitlements to your app:
-
-```xml
-<key>com.apple.security.automation.apple-events</key><true/>
-<key>com.apple.security.files.user-selected.read-write</key><true/>
+```swift
+@Test("Element-based TestApp automation")
+func testTestAppIntegration() async throws {
+    let pilot = AppPilot()
+    let testApp = try await pilot.findApplication(name: "TestApp")
+    let window = try await pilot.findWindow(app: testApp, title: "Mouse Click")
+    
+    // Discover all clickable targets
+    let buttons = try await pilot.findElements(in: window, role: .button)
+    
+    // Click each target and verify via API
+    for button in buttons {
+        try await pilot.click(element: button)
+        // Verify through TestApp's REST API
+        let state = try await testAppAPI.getClickTargets()
+        #expect(state.filter { $0.clicked }.count > 0)
+    }
+}
 ```
 
-Grant these system permissions:
-- ✅ Accessibility
-- ✅ Screen Recording
-- ✅ Automation
+## 🛡️ Permissions
 
-### Building
+AppPilot requires specific macOS permissions to function:
 
-```bash
-# Clean build
-swift package clean
+### Accessibility Permission (Required)
 
-# Build release
-swift build -c release
+1. Open **System Preferences** → **Security & Privacy** → **Privacy** → **Accessibility**
+2. Click the lock to make changes
+3. Add your application to the list
+4. Ensure it's checked/enabled
 
-# Generate Xcode project
-swift package generate-xcodeproj
+### Application Entitlements
+
+For sandboxed applications, add these entitlements:
+
+```xml
+<key>NSAppleEventsUsageDescription</key>
+<string>AppPilot needs AppleEvents access for window management</string>
+
+<key>com.apple.security.automation.apple-events</key>
+<true/>
 ```
 
 ## 📚 API Reference
 
-### Main AppPilot Actor
-
-**Query Methods** (prefixed with `list*`):
-- `listApplications()` → `[AppInfo]`
-- `listWindows(in: AppID)` → `[WindowInfo]`
-- `capture(window: WindowID)` → `CGImage`
-- `accessibilityTree(window: WindowID, depth: Int)` → `AXElement`
-
-**Command Methods** (prefixed with `command*` or action verbs):
-- `click(window:at:button:count:policy:route:)` → `CommandResult`
-- `type(text:into:policy:route:)` → `CommandResult`
-- `gesture(window:_:policy:durationMs:)` → `CommandResult`
-- `performAX(window:path:action:)` → `CommandResult`
-- `sendAppleEvent(app:spec:)` → `CommandResult`
-- `wait(_:)` → `Void`
-
-**Streaming Methods**:
-- `subscribeAX(window:mask:)` → `AsyncStream<AXEvent>`
-
-## 🎨 Examples
-
-Explore the `Examples/` directory for comprehensive usage patterns:
-
-- **BasicUsage.swift**: Getting started guide
-- **TestApp/**: Full integration testing application
-- **Advanced patterns**: Coming soon
-
-## 🔧 Error Handling
-
-AppPilot provides detailed error information:
+### Application Management
 
 ```swift
-enum PilotError: Error {
-    case PERMISSION_DENIED(PermissionKind)
-    case NOT_FOUND(EntityKind, String?)
-    case ROUTE_UNAVAILABLE(String)
-    case VISIBILITY_REQUIRED(String)
-    case TIMEOUT(ms: Int)
-    case OS_FAILURE(api: String, status: Int32)
+// List all applications
+let apps = try await pilot.listApplications()
+
+// Find application by bundle ID
+let safari = try await pilot.findApplication(bundleId: "com.apple.Safari")
+
+// Find application by name
+let finder = try await pilot.findApplication(name: "Finder")
+
+// Get windows for an application
+let windows = try await pilot.listWindows(app: safari)
+
+// Find specific window
+let mainWindow = try await pilot.findWindow(app: safari, title: "Safari")
+```
+
+### UI Element Discovery
+
+```swift
+// Find elements with flexible criteria
+let elements = try await pilot.findElements(
+    in: window,
+    role: .button,           // Optional: filter by role
+    title: "Save",           // Optional: filter by title
+    identifier: "save_btn"   // Optional: filter by identifier
+)
+
+// Specialized finders
+let button = try await pilot.findButton(in: window, title: "OK")
+let textField = try await pilot.findTextField(in: window, placeholder: "Enter text")
+```
+
+### Element-Based Actions
+
+```swift
+// Click discovered elements
+let result = try await pilot.click(element: button)
+
+// Type into text fields
+try await pilot.type(text: "Hello World", into: textField)
+
+// Get element values
+let value = try await pilot.getValue(from: textField)
+
+// Check element existence
+let exists = try await pilot.elementExists(button)
+```
+
+### Screen Capture
+
+```swift
+// Capture window screenshot
+let image = try await pilot.capture(window: window)
+
+// Save to file
+let url = URL(fileURLWithPath: "/tmp/screenshot.png")
+try image.savePNG(to: url)
+```
+
+## 📋 Examples
+
+### Weather App City Search
+
+```swift
+let pilot = AppPilot()
+
+// Find Weather app
+let weatherApp = try await pilot.findApplication(bundleId: "com.apple.weather")
+let window = try await pilot.findWindow(app: weatherApp, index: 0)
+
+// Find and interact with search field
+let searchField = try await pilot.findTextField(in: window)
+try await pilot.click(element: searchField)
+try await pilot.type(text: "Tokyo", into: searchField)
+
+// Wait for and click search result
+let tokyoResult = try await pilot.waitForElement(
+    in: window,
+    role: .button,
+    title: "Tokyo",
+    timeout: 5.0
+)
+try await pilot.click(element: tokyoResult)
+```
+
+### Safari Web Automation
+
+```swift
+let pilot = AppPilot()
+
+// Find Safari
+let safari = try await pilot.findApplication(bundleId: "com.apple.Safari")
+let window = try await pilot.findWindow(app: safari, index: 0)
+
+// Navigate to website
+let addressBar = try await pilot.findTextField(in: window, identifier: "address_bar")
+try await pilot.click(element: addressBar)
+try await pilot.type(text: "https://example.com", into: addressBar)
+
+// Press Enter
+try await pilot.type(text: "\r")
+
+// Wait for page to load and find elements
+try await pilot.wait(.time(seconds: 3.0))
+let links = try await pilot.findElements(in: window, role: .link)
+```
+
+## 🐛 Error Handling
+
+AppPilot provides comprehensive error handling:
+
+```swift
+public enum PilotError: Error {
+    case permissionDenied(String)
+    case applicationNotFound(String)
+    case windowNotFound(WindowHandle)
+    case elementNotFound(role: ElementRole, title: String?)
+    case elementNotAccessible(String)
+    case multipleElementsFound(role: ElementRole, title: String?, count: Int)
+    case timeout(TimeInterval)
+    case osFailure(api: String, code: Int32)
 }
 ```
 
-## 🚦 Project Status
+Handle errors gracefully:
 
-**✅ Completed:**
-- Core architecture and actor system
-- Three-layer command routing
-- Mock driver implementations
-- Comprehensive test suite
-- Documentation and examples
+```swift
+do {
+    let button = try await pilot.findButton(in: window, title: "Submit")
+    try await pilot.click(element: button)
+} catch PilotError.elementNotFound(let role, let title) {
+    print("Button '\(title ?? "unknown")' not found")
+    // Fallback to coordinate-based clicking
+    try await pilot.click(window: window, at: Point(x: 200, y: 300))
+} catch PilotError.permissionDenied(let message) {
+    print("Permission required: \(message)")
+}
+```
 
-**🔧 In Development:**
-- Production macOS API implementations
-- Mission Control private API integration
-- Audit logging system
-- Performance optimizations
+## 🔄 Migration from v2.0
+
+### Key Changes
+
+- **Element-First Approach**: UI elements are now discovered before actions
+- **Smart Targeting**: Find elements by semantic properties, not coordinates
+- **Automatic Coordinate Calculation**: No manual coordinate math required
+- **Better Error Messages**: Descriptive errors about missing elements
+
+### Migration Example
+
+```swift
+// v2.0: Coordinate-based
+try await pilot.click(window: window, at: Point(x: 534, y: 228))
+
+// v3.0: Element-based
+let button = try await pilot.findButton(in: window, title: "Submit")
+try await pilot.click(element: button)
+```
 
 ## 🤝 Contributing
 
-We welcome contributions! Please see our [contribution guidelines](CONTRIBUTING.md) for details.
-
-### Development Workflow
-
 1. Fork the repository
-2. Create your feature branch: `git checkout -b feature/amazing-feature`
-3. Run tests: `swift test`
-4. Commit your changes: `git commit -m 'Add amazing feature'`
-5. Push to the branch: `git push origin feature/amazing-feature`
-6. Open a Pull Request
+2. Create a feature branch
+3. Make your changes
+4. Add tests for new functionality
+5. Ensure all tests pass: `swift test`
+6. Submit a pull request
 
 ## 📄 License
 
-AppPilot is released under the MIT License. See [LICENSE](LICENSE) for details.
+AppPilot is available under the MIT license. See LICENSE file for details.
 
-## 🙏 Acknowledgments
+## 🆘 Support
 
-- Built with Swift 6 and the native Swift Testing framework
-- Inspired by the need for truly background macOS automation
-- Thanks to the macOS accessibility and automation community
+- **Documentation**: Check the inline documentation and examples
+- **Issues**: Report bugs and feature requests on GitHub
+- **Discussions**: Join the community discussions for help and tips
 
 ---
 
-<div align="center">
-
-**Made with ❤️ for the macOS automation community**
-
-[Documentation](docs/) • [Examples](Examples/) • [Issues](issues/) • [Discussions](discussions/)
-
-</div>
+**AppPilot v3.0** - Intelligent UI automation for the modern Mac
