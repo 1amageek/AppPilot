@@ -22,61 +22,18 @@ struct TestAppIntegrationTests {
         let testSession = try await TestSession.create(pilot: pilot, testType: .mouseClick)
         defer { Task { await testSession.cleanup() } }
         
-        // ⭐ Enhanced State Isolation - Wait for stable state
-        try await pilot.wait(.time(seconds: 2.0))
+        // Navigate to Mouse Click tab using shared helper
+        print("🧭 Navigating to Mouse Click tab...")
+        try await testSession.navigateToTab()
+        
+        // Enhanced State Isolation - Wait for stable state
+        try await Task.sleep(nanoseconds: 800_000_000) // 800ms standard wait
         await testSession.resetState()
-        try await pilot.wait(.time(seconds: 1.0))
+        try await Task.sleep(nanoseconds: 800_000_000) // 800ms standard wait
         
-        // Ensure we're on Mouse Click tab
-        print("🧭 Ensuring Mouse Click tab is selected...")
-        let allElements = try await pilot.findElements(in: testSession.window.id)
-        
-        // Look for "Mouse Click" text in sidebar with improved targeting
-        let mouseClickElements = allElements.filter { element in
-            if let title = element.title {
-                return title.contains("Mouse Click") && element.role == ElementRole.staticText
-            }
-            return false
-        }
-        
-        print("🔍 Found \(mouseClickElements.count) 'Mouse Click' text elements")
-        
-        if let mouseClickText = mouseClickElements.first {
-            print("🖱️ Clicking on Mouse Click tab...")
-            let navResult = try await pilot.click(window: testSession.window.id, at: mouseClickText.centerPoint)
-            if navResult.success {
-                try await pilot.wait(.time(seconds: 2.0))
-                print("✅ Navigation to mouse click area successful")
-            }
-        } else {
-            // Try looking for the sidebar cells specifically
-            let sidebarCells = allElements.filter { element in
-                element.role == ElementRole.cell && 
-                element.bounds.width > 200 && 
-                element.bounds.height > 40
-            }
-            
-            print("🔍 Found \(sidebarCells.count) sidebar cells")
-            for (index, cell) in sidebarCells.enumerated() {
-                print("   Cell \(index + 1): bounds=\(cell.bounds)")
-            }
-            
-            // Click on first sidebar cell (should be Mouse Click)
-            if let firstCell = sidebarCells.first {
-                print("🖱️ Clicking on first sidebar cell (Mouse Click)...")
-                let navResult = try await pilot.click(window: testSession.window.id, at: firstCell.centerPoint)
-                if navResult.success {
-                    try await pilot.wait(.time(seconds: 2.0))
-                    print("✅ Navigation to Mouse Click completed")
-                }
-            } else {
-                print("⚠️ No sidebar cells found, staying on current tab")
-            }
-        }
-        
-        // ⭐ State Verification - Ensure clean state before testing
+        // State Verification - Ensure clean state before testing
         await testSession.resetState()
-        try await pilot.wait(.time(seconds: 1.0))
+        try await Task.sleep(nanoseconds: 800_000_000) // 800ms standard wait
         
         // Refresh window information after navigation
         print("🔄 Refreshing window information after navigation...")
@@ -125,7 +82,7 @@ struct TestAppIntegrationTests {
         
         // ⭐ Enhanced State Management - Double-check state before test
         await testSession.resetState()
-        try await pilot.wait(.time(seconds: 1.0))
+        try await Task.sleep(nanoseconds: 800_000_000) // 800ms standard wait
         
         var testResult: (success: Bool, message: String) = (false, "No test performed")
         
@@ -154,7 +111,7 @@ struct TestAppIntegrationTests {
             } else {
                 // ⭐ Retry Logic - Sometimes TestApp needs a moment
                 print("   🔄 Click not detected immediately, retrying verification...")
-                try await pilot.wait(.time(seconds: 1.0))
+                try await Task.sleep(nanoseconds: 800_000_000) // 800ms standard wait
                 
                 let retryState = await testSession.getClickTargets()
                 let retryCount = retryState.filter { $0.clicked }.count
@@ -193,10 +150,13 @@ struct TestAppIntegrationTests {
         let testSession = try await TestSession.create(pilot: pilot, testType: .mouseClick)
         defer { Task { await testSession.cleanup() } }
         
-        // ⭐ Enhanced State Isolation
-        try await pilot.wait(.time(seconds: 2.0))
+        // Navigate to Mouse Click tab
+        try await testSession.navigateToTab()
+        
+        // Enhanced State Isolation
+        try await Task.sleep(nanoseconds: 800_000_000) // 800ms standard wait
         await testSession.resetState()
-        try await pilot.wait(.time(seconds: 1.0))
+        try await Task.sleep(nanoseconds: 800_000_000) // 800ms standard wait
         
         // Stage 1: 見る (See/Observe) - Find the 5 standard targets
         print("\n👁️ Stage 1: 見る (Discover 5-Target Layout)")
@@ -239,7 +199,7 @@ struct TestAppIntegrationTests {
         
         // ⭐ Enhanced State Management - Reset before each test
         await testSession.resetState()
-        try await pilot.wait(.time(seconds: 1.0))
+        try await Task.sleep(nanoseconds: 800_000_000) // 800ms standard wait
         
         var successfulClicks = 0
         
@@ -253,7 +213,7 @@ struct TestAppIntegrationTests {
             #expect(result.success, "Click should succeed on target \(index + 1)")
             
             // ⭐ Enhanced Verification with retry
-            try await pilot.wait(.time(seconds: 1.0))
+            try await Task.sleep(nanoseconds: 800_000_000) // 800ms standard wait
             
             var afterState = await testSession.getClickTargets()
             var afterCount = afterState.filter { $0.clicked }.count
@@ -261,7 +221,7 @@ struct TestAppIntegrationTests {
             // Retry if not detected immediately
             if afterCount <= beforeCount {
                 print("   🔄 Click not detected immediately, retrying verification...")
-                try await pilot.wait(.time(seconds: 1.0))
+                try await Task.sleep(nanoseconds: 800_000_000) // 800ms standard wait
                 afterState = await testSession.getClickTargets()
                 afterCount = afterState.filter { $0.clicked }.count
             }
@@ -274,7 +234,7 @@ struct TestAppIntegrationTests {
             }
             
             // ⭐ Brief pause between targets to avoid interference
-            try await pilot.wait(.time(seconds: 0.5))
+            try await Task.sleep(nanoseconds: 800_000_000) // 800ms standard wait
         }
         
         let accuracy = Double(successfulClicks) / Double(sortedTargets.count)
@@ -297,10 +257,13 @@ struct TestAppIntegrationTests {
         let testSession = try await TestSession.create(pilot: pilot, testType: .mouseClick)
         defer { Task { await testSession.cleanup() } }
         
-        // ⭐ Enhanced State Isolation
-        try await pilot.wait(.time(seconds: 2.0))
+        // Navigate to Mouse Click tab
+        try await testSession.navigateToTab()
+        
+        // Enhanced State Isolation
+        try await Task.sleep(nanoseconds: 800_000_000) // 800ms standard wait
         await testSession.resetState()
-        try await pilot.wait(.time(seconds: 1.0))
+        try await Task.sleep(nanoseconds: 800_000_000) // 800ms standard wait
         
         // Stage 1: 見る (See/Observe) - Discover elements via UI tree
         print("\n👁️ Stage 1: 見る (UI Tree Element Discovery)")
@@ -340,7 +303,7 @@ struct TestAppIntegrationTests {
         
         // ⭐ Enhanced State Management
         await testSession.resetState()
-        try await pilot.wait(.time(seconds: 1.0))
+        try await Task.sleep(nanoseconds: 800_000_000) // 800ms standard wait
         
         // Test clicking using discovered coordinates
         var discoveredClickTests = 0
@@ -358,7 +321,7 @@ struct TestAppIntegrationTests {
             let result = try await pilot.click(window: testSession.window.id, at: point)
             
             // ⭐ Enhanced Verification
-            try await pilot.wait(.time(seconds: 1.0))
+            try await Task.sleep(nanoseconds: 800_000_000) // 800ms standard wait
             
             let afterState = await testSession.getClickTargets()
             let afterCount = afterState.filter { $0.clicked }.count
@@ -371,7 +334,7 @@ struct TestAppIntegrationTests {
             }
             
             // Brief pause between tests
-            try await pilot.wait(.time(seconds: 0.5))
+            try await Task.sleep(nanoseconds: 800_000_000) // 800ms standard wait
         }
         
         print("\n📊 UI Tree Coordinate Discovery Results:")
@@ -395,10 +358,13 @@ struct TestAppIntegrationTests {
         let testSession = try await TestSession.create(pilot: pilot, testType: .keyboard)
         defer { Task { await testSession.cleanup() } }
         
-        // ⭐ Enhanced State Isolation for keyboard tests
-        try await pilot.wait(.time(seconds: 3.0))
+        // Navigate to Keyboard tab
+        try await testSession.navigateToTab()
+        
+        // Enhanced State Isolation for keyboard tests
+        try await Task.sleep(nanoseconds: 800_000_000) // 800ms standard wait
         await testSession.resetState()
-        try await pilot.wait(.time(seconds: 1.5))
+        try await Task.sleep(nanoseconds: 800_000_000) // 800ms standard wait
         
         // Stage 1: 見る (See/Observe) - Navigate to keyboard test area if needed
         print("\n👁️ Stage 1: 見る (Navigate to Keyboard Test Area)")
@@ -468,7 +434,7 @@ struct TestAppIntegrationTests {
             print("   Attempt \(attempt): Clicking on text field...")
             let clickResult = try await pilot.click(window: testSession.window.id, at: mainTextField.centerPoint)
             #expect(clickResult.success, "Text field click should succeed")
-            try await pilot.wait(.time(seconds: 1.0))
+            try await Task.sleep(nanoseconds: 800_000_000) // 800ms standard wait
             
             // Check if field is now responsive
             let updatedField = try await pilot.findElements(in: testSession.window.id)
@@ -493,7 +459,7 @@ struct TestAppIntegrationTests {
         #expect(typeResult.success, "Text typing should succeed")
         
         // ⭐ Enhanced Verification with multiple checks
-        try await pilot.wait(.time(seconds: 2.0))
+        try await Task.sleep(nanoseconds: 800_000_000) // 800ms standard wait
         
         print("3️⃣ Verifying text input...")
         
@@ -624,7 +590,7 @@ struct TestAppIntegrationTests {
             } catch {
                 print("❌ Health check attempt \(attempt) failed: \(error)")
                 if attempt < 3 {
-                    try await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
+                    try await Task.sleep(nanoseconds: 800_000_000) // 800ms standard wait
                 }
             }
         }
@@ -703,7 +669,7 @@ struct TestAppIntegrationTests {
         let pilot = AppPilot()
         
         // ⭐ Enhanced SDK testing with proper initialization
-        try await Task.sleep(nanoseconds: 1_000_000_000) // 1 second initialization
+        try await Task.sleep(nanoseconds: 800_000_000) // 800ms standard wait initialization
         
         // Stage 1: 見る (See/Observe) - Application discovery
         print("\n👁️ Stage 1: 見る (Application Discovery)")
@@ -822,8 +788,11 @@ struct TestAppIntegrationTests {
         let testSession = try await TestSession.create(pilot: pilot, testType: .mouseClick)
         defer { Task { await testSession.cleanup() } }
         
-        // ⭐ Enhanced error testing with proper isolation
-        try await Task.sleep(nanoseconds: 500_000_000) // 500ms
+        // Navigate to Mouse Click tab for coordinate testing
+        try await testSession.navigateToTab()
+        
+        // Enhanced error testing with proper isolation
+        try await Task.sleep(nanoseconds: 800_000_000) // 800ms standard wait
         
         // Test click at extreme coordinates
         let extremePoint = Point(x: -1000.0, y: -1000.0)
@@ -863,12 +832,15 @@ struct TestAppIntegrationTests {
         let testSession1 = try await TestSession.create(pilot: pilot, testType: .mouseClick)
         print("✅ Test session 1 created: \(testSession1.app.name)")
         
+        // Navigate to Mouse Click tab for session 1
+        try await testSession1.navigateToTab()
+        
         // Stage 2: 理解する (Understand) - Test state isolation
         print("\n🧠 Stage 2: 理解する (Test State Management)")
         
         // ⭐ Enhanced state verification
         await testSession1.resetState()
-        try await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
+        try await Task.sleep(nanoseconds: 800_000_000) // 800ms standard wait
         
         let initialTargets = await testSession1.getClickTargets()
         print("🎯 Initial targets: \(initialTargets.count) targets, \(initialTargets.filter { $0.clicked }.count) clicked")
@@ -887,7 +859,7 @@ struct TestAppIntegrationTests {
         if let firstTarget = clickTargets.first {
             print("🖱️ Clicking first target to change state...")
             let _ = try await pilot.click(window: testSession1.window.id, at: firstTarget.centerPoint)
-            try await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
+            try await Task.sleep(nanoseconds: 800_000_000) // 800ms standard wait
             
             let afterClickTargets = await testSession1.getClickTargets()
             let clickedCount = afterClickTargets.filter { $0.clicked }.count
@@ -897,7 +869,7 @@ struct TestAppIntegrationTests {
         // Test state reset
         print("🔄 Testing state reset...")
         await testSession1.resetState()
-        try await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
+        try await Task.sleep(nanoseconds: 800_000_000) // 800ms standard wait
         
         let resetTargets = await testSession1.getClickTargets()
         let resetClickedCount = resetTargets.filter { $0.clicked }.count
@@ -912,9 +884,10 @@ struct TestAppIntegrationTests {
         
         // ⭐ Enhanced session isolation testing
         print("🔄 Testing session isolation...")
-        try await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds
+        try await Task.sleep(nanoseconds: 800_000_000) // 800ms standard wait
         
         let testSession2 = try await TestSession.create(pilot: pilot, testType: .mouseClick)
+        try await testSession2.navigateToTab()
         let session2Targets = await testSession2.getClickTargets()
         let session2ClickedCount = session2Targets.filter { $0.clicked }.count
         
