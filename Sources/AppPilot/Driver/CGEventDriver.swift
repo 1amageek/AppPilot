@@ -11,6 +11,7 @@
 import Foundation
 import CoreGraphics
 import ApplicationServices
+import Carbon
 
 // MARK: - Supporting Types ▸───────────────────────────────────────────────
 
@@ -95,6 +96,12 @@ public protocol CGEventDriver: Sendable {
     // Convenience high‑level typing
     func type(_ text: String) async throws
     
+    // 🌐 Input Source Management
+    func getCurrentInputSource() async throws -> InputSourceInfo
+    func getAvailableInputSources() async throws -> [InputSourceInfo]
+    func switchInputSource(to source: InputSource) async throws
+    func type(_ text: String, inputSource: InputSource) async throws
+    
     // v3.0 Compatibility methods
     func click(at point: Point, button: MouseButton, count: Int) async throws
     func type(text: String) async throws
@@ -120,6 +127,105 @@ public extension CGEventDriver {
     }
     
     func type(text: String) async throws {
+        try await type(text)
+    }
+    
+    // MARK: Input Source Management
+    func getCurrentInputSource() async throws -> InputSourceInfo {
+        let currentSource = TISCopyCurrentKeyboardInputSource().takeRetainedValue()
+        let identifier = TISGetInputSourceProperty(currentSource, kTISPropertyInputSourceID)
+        let name = TISGetInputSourceProperty(currentSource, kTISPropertyLocalizedName)
+        
+        let identifierString = Unmanaged<CFString>.fromOpaque(identifier!).takeUnretainedValue() as String
+        let nameString = Unmanaged<CFString>.fromOpaque(name!).takeUnretainedValue() as String
+        
+        return InputSourceInfo(
+            identifier: identifierString,
+            displayName: nameString,
+            isActive: true
+        )
+    }
+    
+    func getAvailableInputSources() async throws -> [InputSourceInfo] {
+        guard let sources = TISCreateInputSourceList(nil, false)?.takeRetainedValue() else {
+            return []
+        }
+        
+        let sourceCount = CFArrayGetCount(sources)
+        var inputSources: [InputSourceInfo] = []
+        
+        for i in 0..<sourceCount {
+            let source = CFArrayGetValueAtIndex(sources, i)
+            let tisSource = Unmanaged<TISInputSource>.fromOpaque(source!).takeUnretainedValue()
+            
+            guard let identifier = TISGetInputSourceProperty(tisSource, kTISPropertyInputSourceID),
+                  let name = TISGetInputSourceProperty(tisSource, kTISPropertyLocalizedName) else {
+                continue
+            }
+            
+            let identifierString = Unmanaged<CFString>.fromOpaque(identifier).takeUnretainedValue() as String
+            let nameString = Unmanaged<CFString>.fromOpaque(name).takeUnretainedValue() as String
+            
+            // Check if this is a keyboard input source
+            if let category = TISGetInputSourceProperty(tisSource, kTISPropertyInputSourceCategory) {
+                let categoryString = Unmanaged<CFString>.fromOpaque(category).takeUnretainedValue() as String
+                if categoryString == kTISCategoryKeyboardInputSource as String {
+                    inputSources.append(InputSourceInfo(
+                        identifier: identifierString,
+                        displayName: nameString,
+                        isActive: false
+                    ))
+                }
+            }
+        }
+        
+        return inputSources
+    }
+    
+    func switchInputSource(to source: InputSource) async throws {
+        guard source != .automatic else { return }
+        
+        let sources = try await getAvailableInputSources()
+        guard let targetSource = sources.first(where: { $0.identifier == source.rawValue }) else {
+            print("⚠️ Input source not found: \(source.rawValue)")
+            return
+        }
+        
+        // Find the TISInputSource object
+        guard let sourceList = TISCreateInputSourceList(nil, false)?.takeRetainedValue() else {
+            throw PilotError.osFailure(api: "TISCreateInputSourceList", code: -1)
+        }
+        
+        let sourceCount = CFArrayGetCount(sourceList)
+        for i in 0..<sourceCount {
+            let sourceRef = CFArrayGetValueAtIndex(sourceList, i)
+            let tisSource = Unmanaged<TISInputSource>.fromOpaque(sourceRef!).takeUnretainedValue()
+            
+            if let identifier = TISGetInputSourceProperty(tisSource, kTISPropertyInputSourceID) {
+                let identifierString = Unmanaged<CFString>.fromOpaque(identifier).takeUnretainedValue() as String
+                if identifierString == source.rawValue {
+                    let result = TISSelectInputSource(tisSource)
+                    if result != noErr {
+                        throw PilotError.osFailure(api: "TISSelectInputSource", code: result)
+                    }
+                    print("✅ Switched to input source: \(source.displayName)")
+                    return
+                }
+            }
+        }
+        
+        throw PilotError.osFailure(api: "switchInputSource", code: -2)
+    }
+    
+    func type(_ text: String, inputSource: InputSource) async throws {
+        // Switch input source if needed
+        if inputSource != .automatic {
+            try await switchInputSource(to: inputSource)
+            // Wait a bit for the input source to switch
+            try await Task.sleep(nanoseconds: 200_000_000) // 200ms
+        }
+        
+        // Type the text
         try await type(text)
     }
     

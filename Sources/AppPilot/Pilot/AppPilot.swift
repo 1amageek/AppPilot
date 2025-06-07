@@ -437,6 +437,79 @@ public actor AppPilot {
         return ActionResult(success: true)
     }
     
+    // MARK: - Input Source Management
+    
+    /// Get current input source
+    public func getCurrentInputSource() async throws -> InputSourceInfo {
+        print("🌐 AppPilot: Getting current input source")
+        let source = try await cgEventDriver.getCurrentInputSource()
+        print("   Current: \(source.displayName) (\(source.identifier))")
+        return source
+    }
+    
+    /// Get all available input sources
+    public func getAvailableInputSources() async throws -> [InputSourceInfo] {
+        print("🌐 AppPilot: Getting available input sources")
+        let sources = try await cgEventDriver.getAvailableInputSources()
+        print("   Found \(sources.count) input sources")
+        for source in sources {
+            print("     - \(source.displayName) (\(source.identifier))")
+        }
+        return sources
+    }
+    
+    /// Switch to specified input source
+    public func switchInputSource(to source: InputSource) async throws {
+        print("🌐 AppPilot: Switching input source to \(source.displayName)")
+        try await cgEventDriver.switchInputSource(to: source)
+    }
+    
+    /// Type text with specific input source (fallback)
+    public func type(text: String, inputSource: InputSource) async throws -> ActionResult {
+        print("⌨️ AppPilot: Text input with input source")
+        print("   Text: \(text.prefix(50))\(text.count > 50 ? "..." : "")")
+        print("   Input source: \(inputSource.displayName)")
+        print("   ⚠️ Warning: Cannot ensure target app focus without window context")
+        
+        try await cgEventDriver.type(text, inputSource: inputSource)
+        
+        return ActionResult(success: true)
+    }
+    
+    /// Type text into specific element with input source
+    public func type(text: String, into element: UIElement, inputSource: InputSource) async throws -> ActionResult {
+        print("⌨️ AppPilot: Typing into element with input source")
+        print("   Text: \(text.prefix(50))\(text.count > 50 ? "..." : "")")
+        print("   Element: \(element.role.rawValue) '\(element.title ?? element.id)'")
+        print("   Input source: \(inputSource.displayName)")
+        
+        // Verify element is accessible and is a text input
+        guard try await accessibilityDriver.elementExists(element) && element.isEnabled else {
+            throw PilotError.elementNotAccessible(element.id)
+        }
+        
+        guard element.role.isTextInput else {
+            throw PilotError.invalidArgument("Element \(element.role.rawValue) is not a text input field")
+        }
+        
+        print("   ⚠️ Warning: Cannot ensure target app focus for element-only operation")
+        
+        // Click the element first to focus it
+        let _ = try await click(element: element)
+        
+        // Wait a moment for focus to be established
+        try await wait(.time(seconds: 0.1))
+        
+        // Type with input source
+        try await cgEventDriver.type(text, inputSource: inputSource)
+        
+        return ActionResult(
+            success: true,
+            element: element,
+            coordinates: element.centerPoint
+        )
+    }
+    
     /// Perform gesture from one point to another (fallback)
     public func gesture(from startPoint: Point, to endPoint: Point, duration: TimeInterval = 1.0) async throws -> ActionResult {
         print("👆 AppPilot: Gesture from (\(startPoint.x), \(startPoint.y)) to (\(endPoint.x), \(endPoint.y))")

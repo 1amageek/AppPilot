@@ -231,6 +231,40 @@ public struct WindowInfo: Sendable, Codable {
     }
 }
 
+// MARK: - Input Source Types
+
+public enum InputSource: String, Sendable, CaseIterable {
+    case english = "com.apple.keylayout.ABC"
+    case japanese = "com.apple.inputmethod.Kotoeri.RomajiTyping.Roman"
+    case japaneseHiragana = "com.apple.inputmethod.Kotoeri.RomajiTyping.Japanese"
+    case automatic = "automatic"  // Don't change current input source
+    
+    public var displayName: String {
+        switch self {
+        case .english: return "English (ABC)"
+        case .japanese: return "Japanese (Romaji)"
+        case .japaneseHiragana: return "Japanese (Hiragana)"
+        case .automatic: return "Automatic"
+        }
+    }
+    
+    public var isJapanese: Bool {
+        return self == .japanese || self == .japaneseHiragana
+    }
+}
+
+public struct InputSourceInfo: Sendable {
+    public let identifier: String
+    public let displayName: String
+    public let isActive: Bool
+    
+    public init(identifier: String, displayName: String, isActive: Bool) {
+        self.identifier = identifier
+        self.displayName = displayName
+        self.isActive = isActive
+    }
+}
+
 // MARK: - AX Event Types
 
 public struct AXEvent: Sendable {
