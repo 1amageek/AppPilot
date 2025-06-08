@@ -17,7 +17,7 @@ AppPilot is a modern Swift Package Manager library that provides intelligent UI 
 - **🚀 Universal Compatibility**: Works with SwiftUI, AppKit, Electron, and web applications
 - **⏰ Intelligent Waiting**: Wait for elements to appear or conditions to be met
 - **📷 Screen Capture**: Take screenshots of windows and applications using ScreenCaptureKit
-- **🌐 Input Source Management**: Multi-language text input with automatic input source switching
+- **🌐 Multi-Language IME Support**: Advanced composition input for Japanese, Chinese, Korean, and other languages with automatic candidate detection
 - **🔄 Graceful Fallback**: Coordinate-based automation when element detection fails
 - **🛡️ Type Safety**: Built with Swift 6.1 and modern concurrency (Actor-based design)
 - **🧪 Comprehensive Testing**: Swift Testing framework with dedicated TestApp integration
@@ -58,7 +58,7 @@ Add AppPilot to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/your-username/AppPilot.git", from: "1.0.1")
+    .package(url: "https://github.com/your-username/AppPilot.git", from: "1.2.0")
 ]
 ```
 
@@ -155,6 +155,7 @@ swift test --filter ".unit"           # Unit tests
 swift test --filter ".integration"    # Integration tests with TestApp
 swift test --filter ".mouseClick"     # Mouse click accuracy tests
 swift test --filter ".keyboard"       # Keyboard input tests
+swift test --filter "CompositionInput" # Multi-language IME tests
 
 # Run specific tests
 swift test --filter "testElementDiscovery"
@@ -229,8 +230,16 @@ func testInputSourceManagement() async throws {
     try await pilot.type(text: "Hello", into: textField, inputSource: .english)
     
     // Type with Japanese input (if available)
+    // Test Japanese composition input
     if sources.contains(where: { $0.identifier.contains("Japanese") }) {
-        try await pilot.type(text: "こんにちは", into: textField, inputSource: .japanese)
+        let result = try await pilot.input("konnichiwa", into: textField, with: .japaneseRomaji)
+        #expect(result.success, "Japanese composition input should succeed")
+        
+        if result.needsUserDecision {
+            // Test candidate selection
+            let selection = try await pilot.selectCandidate(at: 0, for: textField)
+            #expect(selection.success, "Candidate selection should succeed")
+        }
     }
 }
 ```
@@ -260,7 +269,7 @@ For sandboxed applications, add these entitlements:
 
 ## 🎯 Supported Operations
 
-AppPilot 1.0 provides a comprehensive set of automation operations:
+AppPilot 1.2 provides a comprehensive set of automation operations:
 
 ### Element Discovery Operations
 - `findElements(in:role:title:identifier:)` - Find UI elements with flexible criteria
@@ -272,8 +281,11 @@ AppPilot 1.0 provides a comprehensive set of automation operations:
 
 ### Element-Based Actions
 - `click(element:)` - Click UI element at its center point
-- `type(text:into:)` - Type text into UI element
-- `type(text:into:inputSource:)` - Type with specific input source
+- `input(text:into:)` - Type text into UI element (enhanced)
+- `input(_:into:with:)` - Composition input with IME support (NEW)
+- `selectCandidate(at:for:)` - Select IME conversion candidate (NEW)
+- `commitComposition(for:)` - Commit IME composition (NEW)
+- `cancelComposition(for:)` - Cancel IME composition (NEW)
 - `getValue(from:)` - Get value from UI element
 - `elementExists(_:)` - Check if element is still valid
 
@@ -450,7 +462,7 @@ let tokyoResult = try await pilot.waitForElement(
 try await pilot.click(element: tokyoResult)
 ```
 
-### Multi-Language Text Input
+### Multi-Language Text Input with IME Support
 
 ```swift
 let pilot = AppPilot()
@@ -458,18 +470,79 @@ let pilot = AppPilot()
 // Find text editing app
 let textEdit = try await pilot.findApplication(name: "TextEdit")
 let window = try await pilot.findWindow(app: textEdit, index: 0)
-
-// Find text area and type in different languages
 let textArea = try await pilot.findTextField(in: window)
 
-// Type in English
-try await pilot.type(text: "Hello World", into: textArea, inputSource: .english)
+// Simple English input
+try await pilot.input(text: "Hello World", into: textArea)
 
-// Switch to Japanese and type
-try await pilot.type(text: "こんにちは世界", into: textArea, inputSource: .japanese)
+// Japanese composition input with automatic candidate handling
+let result = try await pilot.input("konnichiwa", into: textArea, with: .japaneseRomaji)
 
-// Type mixed content
-try await pilot.type(text: "\nMixed: English + 日本語", into: textArea)
+// Handle IME candidates if user decision is needed
+if result.needsUserDecision {
+    if let candidates = result.compositionCandidates {
+        print("Available candidates: \(candidates)")
+        // Example: ["こんにちは", "こんにちわ", "今日は"]
+        
+        // Select the first candidate (こんにちは)
+        let selection = try await pilot.selectCandidate(at: 0, for: textArea)
+        
+        // Commit the composition
+        if !selection.isCompositionCompleted {
+            try await pilot.commitComposition(for: textArea)
+        }
+    }
+}
+
+// Chinese input with Pinyin
+let chineseResult = try await pilot.input("ni hao", into: textArea, with: .chinesePinyin)
+// Handles: "ni hao" → "你好" with candidate selection if needed
+
+// Korean input
+let koreanResult = try await pilot.input("annyeong", into: textArea, with: .korean)
+// Handles: "annyeong" → "안녕" with automatic composition
+
+// Direct input (bypasses IME for final text)
+try await pilot.input("こんにちは", into: textArea) // Direct hiragana input
+```
+
+### Advanced IME Composition Workflow
+
+```swift
+let pilot = AppPilot()
+
+// Setup
+let app = try await pilot.findApplication(name: "TextEdit")
+let window = try await pilot.findWindow(app: app, index: 0)
+let textField = try await pilot.findTextField(in: window)
+
+// Complex Japanese input workflow
+let inputResult = try await pilot.input("arigatougozaimasu", into: textField, with: .japaneseRomaji)
+
+// Check if the IME presents multiple conversion candidates
+if case .candidateSelection(_, let candidates, let selectedIndex) = inputResult.compositionData?.state {
+    print("Candidates available:")
+    for (index, candidate) in candidates.enumerated() {
+        let marker = index == selectedIndex ? "👉" : "  "
+        print("\(marker) \(index): \(candidate)")
+    }
+    
+    // Select different candidate if needed
+    if selectedIndex != 0 {
+        try await pilot.selectCandidate(at: 0, for: textField)
+    }
+    
+    // Commit the final selection
+    try await pilot.commitComposition(for: textField)
+} else if case .committed(let finalText) = inputResult.compositionData?.state {
+    print("Automatically committed: \(finalText)")
+}
+
+// Cancel composition if needed
+if inputResult.needsUserDecision {
+    // User decides to cancel
+    try await pilot.cancelComposition(for: textField)
+}
 ```
 
 ## 🐛 Error Handling
@@ -506,7 +579,7 @@ do {
 
 ## 🔄 Migration Guide
 
-### Key Changes in 1.0
+### Key Changes in 1.2
 
 - **Element-First Approach**: UI elements are discovered before actions
 - **Smart Targeting**: Find elements by semantic properties, not coordinates
@@ -523,7 +596,7 @@ do {
 // v2.0: Hardcoded coordinate clicking
 try await pilot.click(window: window, at: Point(x: 534, y: 228))
 
-// 1.0: Smart element discovery and clicking
+// 1.2: Smart element discovery and clicking
 let button = try await pilot.findButton(in: window, title: "Submit")
 try await pilot.click(element: button)
 ```
@@ -533,7 +606,7 @@ try await pilot.click(element: button)
 // v2.0: Focus app and type blindly
 try await pilot.type(text: "Hello World")
 
-// 1.0: Find text field and type into it
+// 1.2: Find text field and type into it
 let textField = try await pilot.findTextField(in: window)
 try await pilot.type(text: "Hello World", into: textField)
 ```
@@ -544,7 +617,7 @@ try await pilot.type(text: "Hello World", into: textField)
 let buttonCenter = Point(x: 200, y: 150)
 try await pilot.click(window: window, at: buttonCenter)
 
-// 1.0: Automatic element discovery and interaction
+// 1.2: Automatic element discovery and interaction
 let allButtons = try await pilot.findElements(in: window, role: .button)
 for button in allButtons where button.isEnabled {
     try await pilot.click(element: button)  // Automatically uses element.centerPoint
@@ -556,7 +629,7 @@ for button in allButtons where button.isEnabled {
 // v2.0: Fixed time waits
 try await Task.sleep(nanoseconds: 2_000_000_000)
 
-// 1.0: Semantic wait conditions
+// 1.2: Semantic wait conditions
 try await pilot.waitForElement(in: window, role: .button, title: "Continue", timeout: 10.0)
 try await pilot.wait(.elementDisappear(window: window, role: .dialog, title: "Loading"))
 ```
@@ -582,4 +655,4 @@ AppPilot is available under the MIT license. See LICENSE file for details.
 
 ---
 
-**AppPilot 1.0** - Intelligent UI automation for the modern Mac
+**AppPilot 1.2** - Intelligent UI automation for the modern Mac

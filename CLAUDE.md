@@ -17,6 +17,7 @@ swift test --filter "testMethodName"
 # Run tests with specific tags
 swift test --filter ".unit"
 swift test --filter ".integration"
+swift test --filter "CompositionInput"  # Multi-language IME tests
 
 # Clean build artifacts
 swift package clean
