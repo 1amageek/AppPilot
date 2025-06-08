@@ -219,12 +219,13 @@ public actor AppPilot {
         return ActionResult(
             success: true,
             element: element,
-            coordinates: centerPoint
+            coordinates: centerPoint,
+            data: .click
         )
     }
     
     /// Type text into UI element
-    public func type(text: String, into element: UIElement) async throws -> ActionResult {
+    public func type(text: String, into element: UIElement, verifyInput: Bool = true) async throws -> ActionResult {
         // Verify element is accessible and is a text input
         guard try await accessibilityDriver.elementExists(element) && element.isEnabled else {
             throw PilotError.elementNotAccessible(element.id)
@@ -243,10 +244,19 @@ public actor AppPilot {
         // Type the text
         try await cgEventDriver.type(text: text)
         
+        // Input verification
+        var actualText: String? = nil
+        
+        if verifyInput {
+            try await wait(.time(seconds: 0.2))
+            actualText = try await getValue(from: element)
+        }
+        
         return ActionResult(
             success: true,
             element: element,
-            coordinates: element.centerPoint
+            coordinates: element.centerPoint,
+            data: .type(inputText: text, actualText: actualText, inputSource: nil)
         )
     }
     
@@ -777,7 +787,7 @@ public actor AppPilot {
     }
     
     /// Type text into specific element with input source
-    public func type(text: String, into element: UIElement, inputSource: InputSource) async throws -> ActionResult {
+    public func type(text: String, into element: UIElement, inputSource: InputSource, verifyInput: Bool = true) async throws -> ActionResult {
         // Verify element is accessible and is a text input
         guard try await accessibilityDriver.elementExists(element) && element.isEnabled else {
             throw PilotError.elementNotAccessible(element.id)
@@ -796,10 +806,19 @@ public actor AppPilot {
         // Type with input source
         try await cgEventDriver.type(text, inputSource: inputSource)
         
+        // Input verification
+        var actualText: String? = nil
+        
+        if verifyInput {
+            try await wait(.time(seconds: 0.2))
+            actualText = try await getValue(from: element)
+        }
+        
         return ActionResult(
             success: true,
             element: element,
-            coordinates: element.centerPoint
+            coordinates: element.centerPoint,
+            data: .type(inputText: text, actualText: actualText, inputSource: inputSource)
         )
     }
     
@@ -886,7 +905,7 @@ public actor AppPilot {
     }
     
     /// Type text into a specific UI element (focuses first)
-    public func typeIntoElement(_ element: UIElement, text: String, in window: WindowHandle) async throws -> ActionResult {
+    public func typeIntoElement(_ element: UIElement, text: String, in window: WindowHandle, verifyInput: Bool = true) async throws -> ActionResult {
         print("⌨️ AppPilot: Typing into element \(element.role): \(element.title ?? element.id)")
         print("   Text: \(text.prefix(50))\(text.count > 50 ? "..." : "")")
         
@@ -905,9 +924,18 @@ public actor AppPilot {
         // Then type the text
         let typeResult = try await type(text: text)
         
+        // Input verification if requested
+        var actualText: String? = nil
+        
+        if verifyInput {
+            try await wait(.time(seconds: 0.2))
+            actualText = try await getValue(from: element)
+        }
+        
         return ActionResult(
             success: typeResult.success,
-            coordinates: element.centerPoint
+            coordinates: element.centerPoint,
+            data: .type(inputText: text, actualText: actualText, inputSource: nil)
         )
     }
     

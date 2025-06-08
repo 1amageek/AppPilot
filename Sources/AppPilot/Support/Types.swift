@@ -74,7 +74,7 @@ internal struct WindowID: Hashable, Sendable {
 /// let point = Point(x: 100, y: 200)
 /// try await pilot.click(window: window, at: point)
 /// ```
-public struct Point: Sendable, Equatable {
+public struct Point: Sendable, Equatable, Codable {
     /// The x-coordinate in screen coordinates
     public let x: CGFloat
     /// The y-coordinate in screen coordinates
@@ -313,6 +313,25 @@ public enum WaitSpec: Sendable {
 
 // MARK: - Result Types (v3.0)
 
+/// Action-specific data for different types of operations
+/// 
+/// `ActionResultData` contains specific information about different automation actions,
+/// providing type-safe access to action-specific details.
+public enum ActionResultData: Sendable, Codable {
+    /// Click operation data
+    case click
+    /// Type operation data
+    case type(inputText: String, actualText: String?, inputSource: InputSource?)
+    /// Drag operation data
+    case drag(startPoint: Point, endPoint: Point, duration: TimeInterval)
+    /// Scroll operation data
+    case scroll(deltaX: Double, deltaY: Double)
+    /// Key press operation data
+    case keyPress(keys: [String], modifiers: [String])
+    /// Wait operation data
+    case wait(duration: TimeInterval)
+}
+
 /// Result of an automation action
 /// 
 /// `ActionResult` contains information about the outcome of an automation operation,
@@ -323,8 +342,14 @@ public enum WaitSpec: Sendable {
 /// if result.success {
 ///     print("Button clicked at \(result.coordinates!)")
 /// }
+/// 
+/// // For type operations
+/// let typeResult = try await pilot.type(text: "Hello", into: textField)
+/// if case .type(let inputText, let actualText, _) = typeResult.data {
+///     print("Typed: \(inputText), Actual: \(actualText ?? "unknown")")
+/// }
 /// ```
-public struct ActionResult: Sendable {
+public struct ActionResult: Sendable, Codable {
     /// Whether the action completed successfully
     public let success: Bool
     /// When the action was performed
@@ -333,6 +358,8 @@ public struct ActionResult: Sendable {
     public let element: UIElement?
     /// The screen coordinates where the action occurred, if applicable
     public let coordinates: Point?
+    /// Action-specific data
+    public let data: ActionResultData?
     
     /// Creates a new action result
     /// 
@@ -341,11 +368,13 @@ public struct ActionResult: Sendable {
     ///   - timestamp: When the action occurred (defaults to now)
     ///   - element: The UI element involved, if any
     ///   - coordinates: The coordinates where the action occurred, if applicable
-    public init(success: Bool, timestamp: Date = Date(), element: UIElement? = nil, coordinates: Point? = nil) {
+    ///   - data: Action-specific data, if any
+    public init(success: Bool, timestamp: Date = Date(), element: UIElement? = nil, coordinates: Point? = nil, data: ActionResultData? = nil) {
         self.success = success
         self.timestamp = timestamp
         self.element = element
         self.coordinates = coordinates
+        self.data = data
     }
 }
 
@@ -435,7 +464,7 @@ public struct WindowInfo: Sendable, Codable {
 
 // MARK: - Input Source Types
 
-public enum InputSource: String, Sendable, CaseIterable {
+public enum InputSource: String, Sendable, CaseIterable, Codable {
     case english = "com.apple.keylayout.ABC"
     case japanese = "com.apple.inputmethod.Kotoeri.RomajiTyping.Roman"
     case japaneseHiragana = "com.apple.inputmethod.Kotoeri.RomajiTyping.Japanese"
