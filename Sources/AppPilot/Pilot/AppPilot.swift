@@ -72,9 +72,8 @@ public actor AppPilot {
     /// - Parameters:
     ///   - app: The application handle to search within
     ///   - title: The window title to search for
-    /// - Returns: A `WindowHandle` for the found window
-    /// - Throws: `PilotError.windowNotFound` if no window with the specified title exists
-    public func findWindow(app: AppHandle, title: String) async throws -> WindowHandle {
+    /// - Returns: A `WindowHandle` for the found window, or `nil` if not found
+    public func findWindow(app: AppHandle, title: String) async throws -> WindowHandle? {
         return try await accessibilityDriver.findWindow(app: app, title: title)
     }
     
@@ -86,9 +85,8 @@ public actor AppPilot {
     /// - Parameters:
     ///   - app: The application handle to search within
     ///   - index: The zero-based index of the window
-    /// - Returns: A `WindowHandle` for the window at the specified index
-    /// - Throws: `PilotError.windowNotFound` if the index is out of bounds
-    public func findWindow(app: AppHandle, index: Int) async throws -> WindowHandle {
+    /// - Returns: A `WindowHandle` for the window at the specified index, or `nil` if index is out of bounds
+    public func findWindow(app: AppHandle, index: Int) async throws -> WindowHandle? {
         return try await accessibilityDriver.findWindow(app: app, index: index)
     }
     
@@ -207,8 +205,6 @@ public actor AppPilot {
     
     /// Click UI element (automatically calculates center point)
     public func click(element: UIElement) async throws -> ActionResult {
-        print("🖱️ AppPilot: Clicking element: \(element.role.rawValue) '\(element.title ?? element.id)'")
-        
         // Verify element is still accessible and enabled
         guard try await accessibilityDriver.elementExists(element) && element.isEnabled else {
             throw PilotError.elementNotAccessible(element.id)
@@ -216,11 +212,6 @@ public actor AppPilot {
         
         // Calculate center point automatically
         let centerPoint = element.centerPoint
-        print("   Center point: (\(centerPoint.x), \(centerPoint.y))")
-        
-        // Note: Element-based operations cannot ensure app focus without window context
-        // For safer operations, use click(window:at:) or clickElement(_:in:)
-        print("   ⚠️ Warning: Cannot ensure target app focus for element-only operation")
         
         // Perform CGEvent click at the center point
         try await cgEventDriver.click(at: centerPoint)
@@ -234,9 +225,6 @@ public actor AppPilot {
     
     /// Type text into UI element
     public func type(text: String, into element: UIElement) async throws -> ActionResult {
-        print("⌨️ AppPilot: Typing into element: \(element.role.rawValue)")
-        print("   Text: \(text.prefix(50))\(text.count > 50 ? "..." : "")")
-        
         // Verify element is accessible and is a text input
         guard try await accessibilityDriver.elementExists(element) && element.isEnabled else {
             throw PilotError.elementNotAccessible(element.id)
@@ -245,9 +233,6 @@ public actor AppPilot {
         guard element.role.isTextInput else {
             throw PilotError.invalidArgument("Element \(element.role.rawValue) is not a text input field")
         }
-        
-        // Note: Element-based operations cannot ensure app focus without window context
-        // For safer operations, use typeIntoElement(_:text:in:)
         
         // Click the element first to focus it
         let _ = try await click(element: element)
@@ -506,6 +491,69 @@ public actor AppPilot {
         )
     }
     
+    /// Click at coordinates (safe version with window context)
+    /// 
+    /// Performs a mouse click at the specified coordinates with automatic app focus management.
+    /// This is the recommended version that ensures the target application is focused before clicking.
+    /// 
+    /// - Parameters:
+    ///   - point: The screen coordinates to click at
+    ///   - button: The mouse button to use (default: `.left`)
+    ///   - count: Number of clicks to perform (default: `1`)
+    ///   - window: The window context for app focus management
+    /// - Returns: An `ActionResult` indicating success and the coordinates clicked
+    /// - Throws: `PilotError.eventCreationFailed` if the click event cannot be created
+    public func click(
+        at point: Point,
+        button: MouseButton = .left,
+        count: Int = 1,
+        window: WindowHandle
+    ) async throws -> ActionResult {
+        try await ensureTargetAppFocus(for: window)
+        try await validateCoordinates(point, for: window)
+        try await cgEventDriver.click(at: point, button: button, count: count)
+        return ActionResult(success: true, coordinates: point)
+    }
+    
+    /// Click at coordinates (fallback version without window context)
+    /// 
+    /// Performs a mouse click at the specified coordinates without app focus management.
+    /// This is a fallback method for backwards compatibility.
+    /// 
+    /// - Parameters:
+    ///   - point: The screen coordinates to click at
+    ///   - button: The mouse button to use (default: `.left`)
+    ///   - count: Number of clicks to perform (default: `1`)
+    /// - Returns: An `ActionResult` indicating success and the coordinates clicked
+    /// - Throws: `PilotError.eventCreationFailed` if the click event cannot be created
+    public func click(
+        at point: Point,
+        button: MouseButton = .left,
+        count: Int = 1
+    ) async throws -> ActionResult {
+        try await cgEventDriver.click(at: point, button: button, count: count)
+        return ActionResult(success: true, coordinates: point)
+    }
+    
+    /// Type text (safe version with window context)
+    /// 
+    /// Types text with automatic app focus management to ensure the text goes to the correct application.
+    /// This is the recommended version for reliable text input.
+    /// 
+    /// - Parameters:
+    ///   - text: The text to type
+    ///   - window: The window context for app focus management
+    /// - Returns: An `ActionResult` indicating success
+    /// - Throws: `PilotError.eventCreationFailed` if keyboard events cannot be created
+    public func type(
+        _ text: String,
+        window: WindowHandle
+    ) async throws -> ActionResult {
+        try await ensureTargetAppFocus(for: window)
+        try await cgEventDriver.type(text: text)
+        return ActionResult(success: true)
+    }
+    
     /// Type text to currently focused application (fallback)
     /// 
     /// Types text into the currently focused application without targeting a specific
@@ -522,12 +570,53 @@ public actor AppPilot {
     /// - Note: This method types text to whatever application currently has focus,
     ///   which may not be the intended target.
     public func type(text: String) async throws -> ActionResult {
-        // Note: Without window context, we cannot ensure specific app focus
-        // This is a fallback method for backwards compatibility
-        
         try await cgEventDriver.type(text: text)
-        
         return ActionResult(success: true)
+    }
+    
+    /// Drag operation (safe version with window context)
+    /// 
+    /// Performs a drag operation from one point to another with automatic app focus management.
+    /// This is the recommended version that ensures the target application is focused before dragging.
+    /// 
+    /// - Parameters:
+    ///   - startPoint: The starting point for the drag
+    ///   - endPoint: The ending point for the drag
+    ///   - duration: Duration of the drag operation in seconds (default: 1.0)
+    ///   - window: The window context for app focus management
+    /// - Returns: An `ActionResult` indicating success and the end coordinates
+    /// - Throws: `PilotError.eventCreationFailed` if drag events cannot be created
+    public func drag(
+        from startPoint: Point,
+        to endPoint: Point,
+        duration: TimeInterval = 1.0,
+        window: WindowHandle
+    ) async throws -> ActionResult {
+        try await ensureTargetAppFocus(for: window)
+        try await validateCoordinates(startPoint, for: window)
+        try await validateCoordinates(endPoint, for: window)
+        try await cgEventDriver.drag(from: startPoint, to: endPoint, duration: duration)
+        return ActionResult(success: true, coordinates: endPoint)
+    }
+    
+    /// Drag operation (fallback version without window context)
+    /// 
+    /// Performs a drag operation from one point to another without app focus management.
+    /// This is a fallback method for backwards compatibility.
+    /// 
+    /// - Parameters:
+    ///   - startPoint: The starting point for the drag
+    ///   - endPoint: The ending point for the drag
+    ///   - duration: Duration of the drag operation in seconds (default: 1.0)
+    /// - Returns: An `ActionResult` indicating success and the end coordinates
+    /// - Throws: `PilotError.eventCreationFailed` if drag events cannot be created
+    public func drag(
+        from startPoint: Point,
+        to endPoint: Point,
+        duration: TimeInterval = 1.0
+    ) async throws -> ActionResult {
+        try await cgEventDriver.drag(from: startPoint, to: endPoint, duration: duration)
+        return ActionResult(success: true, coordinates: endPoint)
     }
     
     // MARK: - Input Source Management
@@ -588,25 +677,107 @@ public actor AppPilot {
         try await cgEventDriver.switchInputSource(to: source)
     }
     
+    /// Type text with specific input source (safe version with window context)
+    /// 
+    /// Types text using a specific input source with automatic app focus management.
+    /// This is the recommended version for reliable multilingual text input.
+    /// 
+    /// - Parameters:
+    ///   - text: The text to type
+    ///   - inputSource: The input source to use for typing
+    ///   - window: The window context for app focus management
+    /// - Returns: An `ActionResult` indicating success
+    /// - Throws: `PilotError.eventCreationFailed` if keyboard events cannot be created
+    public func type(
+        _ text: String,
+        inputSource: InputSource,
+        window: WindowHandle
+    ) async throws -> ActionResult {
+        try await ensureTargetAppFocus(for: window)
+        try await cgEventDriver.type(text, inputSource: inputSource)
+        return ActionResult(success: true)
+    }
+    
     /// Type text with specific input source (fallback)
     public func type(text: String, inputSource: InputSource) async throws -> ActionResult {
-        print("⌨️ AppPilot: Text input with input source")
-        print("   Text: \(text.prefix(50))\(text.count > 50 ? "..." : "")")
-        print("   Input source: \(inputSource.displayName)")
-        print("   ⚠️ Warning: Cannot ensure target app focus without window context")
-        
         try await cgEventDriver.type(text, inputSource: inputSource)
-        
         return ActionResult(success: true)
+    }
+    
+    /// Scroll operation (safe version with window context)
+    /// 
+    /// Performs a scroll operation with automatic app focus management and coordinate calculation.
+    /// This is the recommended version that ensures scrolling happens in the correct window.
+    /// 
+    /// - Parameters:
+    ///   - deltaX: Horizontal scroll amount (positive = right, negative = left)
+    ///   - deltaY: Vertical scroll amount (positive = down, negative = up)
+    ///   - point: Optional scroll position (defaults to window center)
+    ///   - window: The window context for app focus management
+    /// - Returns: An `ActionResult` indicating success and the scroll position
+    /// - Throws: `PilotError.eventCreationFailed` if scroll events cannot be created
+    public func scroll(
+        deltaX: Double = 0,
+        deltaY: Double = 0,
+        at point: Point? = nil,
+        window: WindowHandle
+    ) async throws -> ActionResult {
+        try await ensureTargetAppFocus(for: window)
+        
+        let scrollPoint: Point
+        if let point = point {
+            scrollPoint = point
+        } else {
+            // Use window center if no point specified
+            let apps = try await listApplications()
+            var windowInfo: WindowInfo?
+            
+            for app in apps {
+                do {
+                    let windows = try await listWindows(app: app.id)
+                    if let found = windows.first(where: { $0.id == window }) {
+                        windowInfo = found
+                        break
+                    }
+                } catch {
+                    continue
+                }
+            }
+            
+            if let windowInfo = windowInfo {
+                scrollPoint = Point(x: windowInfo.bounds.midX, y: windowInfo.bounds.midY)
+            } else {
+                scrollPoint = Point(x: 400.0, y: 400.0) // Default center
+            }
+        }
+        
+        try await validateCoordinates(scrollPoint, for: window)
+        try await cgEventDriver.scroll(deltaX: deltaX, deltaY: deltaY, at: scrollPoint)
+        return ActionResult(success: true, coordinates: scrollPoint)
+    }
+    
+    /// Scroll operation (fallback version without window context)
+    /// 
+    /// Performs a scroll operation at a specific point without app focus management.
+    /// This is a fallback method for backwards compatibility.
+    /// 
+    /// - Parameters:
+    ///   - deltaX: Horizontal scroll amount (positive = right, negative = left)
+    ///   - deltaY: Vertical scroll amount (positive = down, negative = up)
+    ///   - point: The position to scroll at
+    /// - Returns: An `ActionResult` indicating success and the scroll position
+    /// - Throws: `PilotError.eventCreationFailed` if scroll events cannot be created
+    public func scroll(
+        deltaX: Double = 0,
+        deltaY: Double = 0,
+        at point: Point
+    ) async throws -> ActionResult {
+        try await cgEventDriver.scroll(deltaX: deltaX, deltaY: deltaY, at: point)
+        return ActionResult(success: true, coordinates: point)
     }
     
     /// Type text into specific element with input source
     public func type(text: String, into element: UIElement, inputSource: InputSource) async throws -> ActionResult {
-        print("⌨️ AppPilot: Typing into element with input source")
-        print("   Text: \(text.prefix(50))\(text.count > 50 ? "..." : "")")
-        print("   Element: \(element.role.rawValue) '\(element.title ?? element.id)'")
-        print("   Input source: \(inputSource.displayName)")
-        
         // Verify element is accessible and is a text input
         guard try await accessibilityDriver.elementExists(element) && element.isEnabled else {
             throw PilotError.elementNotAccessible(element.id)
@@ -615,8 +786,6 @@ public actor AppPilot {
         guard element.role.isTextInput else {
             throw PilotError.invalidArgument("Element \(element.role.rawValue) is not a text input field")
         }
-        
-        print("   ⚠️ Warning: Cannot ensure target app focus for element-only operation")
         
         // Click the element first to focus it
         let _ = try await click(element: element)
@@ -634,20 +803,35 @@ public actor AppPilot {
         )
     }
     
+    /// Perform gesture from one point to another (safe version with window context)
+    /// 
+    /// Performs a gesture operation with automatic app focus management.
+    /// This is the recommended version that ensures the gesture happens in the correct window.
+    /// 
+    /// - Parameters:
+    ///   - startPoint: The starting point for the gesture
+    ///   - endPoint: The ending point for the gesture
+    ///   - duration: Duration of the gesture in seconds (default: 1.0)
+    ///   - window: The window context for app focus management
+    /// - Returns: An `ActionResult` indicating success and the end coordinates
+    /// - Throws: `PilotError.eventCreationFailed` if gesture events cannot be created
+    public func gesture(
+        from startPoint: Point,
+        to endPoint: Point,
+        duration: TimeInterval = 1.0,
+        window: WindowHandle
+    ) async throws -> ActionResult {
+        try await ensureTargetAppFocus(for: window)
+        try await validateCoordinates(startPoint, for: window)
+        try await validateCoordinates(endPoint, for: window)
+        try await cgEventDriver.drag(from: startPoint, to: endPoint, duration: duration)
+        return ActionResult(success: true, coordinates: endPoint)
+    }
+    
     /// Perform gesture from one point to another (fallback)
     public func gesture(from startPoint: Point, to endPoint: Point, duration: TimeInterval = 1.0) async throws -> ActionResult {
-        print("👆 AppPilot: Gesture from (\(startPoint.x), \(startPoint.y)) to (\(endPoint.x), \(endPoint.y))")
-        
-        // Note: Without window context, we cannot ensure specific app focus
-        // This is a fallback method for backwards compatibility
-        print("   ⚠️ Warning: Cannot ensure target app focus without window context")
-        
         try await cgEventDriver.drag(from: startPoint, to: endPoint, duration: duration)
-        
-        return ActionResult(
-            success: true,
-            coordinates: endPoint
-        )
+        return ActionResult(success: true, coordinates: endPoint)
     }
     
     /// Capture screenshot of window
@@ -727,44 +911,6 @@ public actor AppPilot {
         )
     }
     
-    // MARK: - Legacy API Compatibility (for existing tests)
-    
-    /// Legacy method for screen coordinate clicks (without window context)
-    public func click(at point: Point, button: MouseButton = .left, count: Int = 1) async throws -> ActionResult {
-        print("🖱️ AppPilot: Legacy screen coordinate click at (\(point.x), \(point.y))")
-        
-        try await cgEventDriver.click(at: point, button: button, count: count)
-        
-        return ActionResult(
-            success: true,
-            coordinates: point
-        )
-    }
-    
-    /// Legacy drag/gesture method  
-    public func drag(from startPoint: Point, to endPoint: Point, duration: TimeInterval = 1.0) async throws -> ActionResult {
-        return try await gesture(from: startPoint, to: endPoint, duration: duration)
-    }
-    
-    /// Pinch gesture for zoom (legacy compatibility)
-    public func pinch(center: Point, scale: CGFloat, duration: TimeInterval = 1.0) async throws -> ActionResult {
-        print("🤏 AppPilot: Pinch gesture at (\(center.x), \(center.y)) scale: \(scale)")
-        
-        // Simulate pinch by moving fingers apart/together
-        let distance = CGFloat(50 * scale)
-        let startPoint1 = Point(x: center.x - distance/2, y: center.y)
-        let endPoint1 = Point(x: center.x - distance, y: center.y)
-        let startPoint2 = Point(x: center.x + distance/2, y: center.y)
-        let endPoint2 = Point(x: center.x + distance, y: center.y)
-        
-        // For now, just do a simple gesture
-        try await gesture(from: startPoint1, to: endPoint1, duration: duration)
-        
-        return ActionResult(
-            success: true,
-            coordinates: center
-        )
-    }
     
     /// Key combination support
     public func keyCombination(_ keys: [VirtualKey], modifiers: [ModifierKey]) async throws -> ActionResult {
@@ -774,17 +920,5 @@ public actor AppPilot {
         try await cgEventDriver.keyCombination(keys, modifiers: modifiers)
         
         return ActionResult(success: true)
-    }
-}
-
-// MARK: - Internal Helper Extensions
-
-extension AppPilot {
-    
-    /// Quick method to find app and window for testing
-    internal func findTestApp(name: String = "TestApp") async throws -> (app: AppHandle, window: WindowHandle) {
-        let app = try await findApplication(name: name)
-        let window = try await findWindow(app: app, index: 0)
-        return (app: app, window: window)
     }
 }

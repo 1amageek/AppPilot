@@ -10,8 +10,8 @@ public protocol AccessibilityDriver: Sendable {
     func findApplication(bundleId: String) async throws -> AppHandle
     func findApplication(name: String) async throws -> AppHandle
     func getWindows(for app: AppHandle) async throws -> [WindowInfo]
-    func findWindow(app: AppHandle, title: String) async throws -> WindowHandle
-    func findWindow(app: AppHandle, index: Int) async throws -> WindowHandle
+    func findWindow(app: AppHandle, title: String) async throws -> WindowHandle?
+    func findWindow(app: AppHandle, index: Int) async throws -> WindowHandle?
     
     // UI Element Discovery
     func findElements(in window: WindowHandle, role: ElementRole?, title: String?, identifier: String?) async throws -> [UIElement]
@@ -136,23 +136,21 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
         return windows
     }
     
-    public func findWindow(app: AppHandle, title: String) async throws -> WindowHandle {
+    public func findWindow(app: AppHandle, title: String) async throws -> WindowHandle? {
         let windows = try await getWindows(for: app)
         
-        guard let window = windows.first(where: { 
+        let window = windows.first(where: { 
             $0.title?.localizedCaseInsensitiveContains(title) == true 
-        }) else {
-            throw PilotError.windowNotFound(WindowHandle(id: "not_found"))
-        }
+        })
         
-        return window.id
+        return window?.id
     }
     
-    public func findWindow(app: AppHandle, index: Int) async throws -> WindowHandle {
+    public func findWindow(app: AppHandle, index: Int) async throws -> WindowHandle? {
         let windows = try await getWindows(for: app)
         
         guard index >= 0 && index < windows.count else {
-            throw PilotError.windowNotFound(WindowHandle(id: "index_out_of_bounds"))
+            return nil
         }
         
         return windows[index].id

@@ -519,3 +519,17 @@ extension String {
         return String(repeating: string, count: count)
     }
 }
+
+// MARK: - Internal Helper Extensions
+
+extension AppPilot {
+    
+    /// Quick method to find app and window for testing
+    internal func findTestApp(name: String = "TestApp") async throws -> (app: AppHandle, window: WindowHandle) {
+        let app = try await findApplication(name: name)
+        guard let window = try await findWindow(app: app, index: 0) else {
+            throw PilotError.windowNotFound(WindowHandle(id: "not_found"))
+        }
+        return (app: app, window: window)
+    }
+}
