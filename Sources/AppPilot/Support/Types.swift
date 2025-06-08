@@ -322,6 +322,8 @@ public enum ActionResultData: Sendable, Codable {
     case click
     /// Type operation data
     case type(inputText: String, actualText: String?, inputSource: InputSource?, composition: CompositionInputResult?)
+    /// Direct value setting operation data
+    case setValue(inputValue: String, actualValue: String?)
     /// Drag operation data
     case drag(startPoint: Point, endPoint: Point, duration: TimeInterval)
     /// Scroll operation data
@@ -519,6 +521,9 @@ public enum InputSource: String, Sendable, CaseIterable, Codable {
     case english = "com.apple.keylayout.ABC"
     case japanese = "com.apple.inputmethod.Kotoeri.RomajiTyping.Roman"
     case japaneseHiragana = "com.apple.inputmethod.Kotoeri.RomajiTyping.Japanese"
+    case chinesePinyin = "com.apple.inputmethod.SCIM.ITABC"
+    case chineseTraditional = "com.apple.inputmethod.TCIM.Cangjie"
+    case koreanIM = "com.apple.inputmethod.Korean.2SetKorean"
     case automatic = "automatic"  // Don't change current input source
     
     public var displayName: String {
@@ -526,12 +531,23 @@ public enum InputSource: String, Sendable, CaseIterable, Codable {
         case .english: return "English (ABC)"
         case .japanese: return "Japanese (Romaji)"
         case .japaneseHiragana: return "Japanese (Hiragana)"
+        case .chinesePinyin: return "Chinese (Pinyin)"
+        case .chineseTraditional: return "Chinese (Traditional)"
+        case .koreanIM: return "Korean (2-Set)"
         case .automatic: return "Automatic"
         }
     }
     
     public var isJapanese: Bool {
         return self == .japanese || self == .japaneseHiragana
+    }
+    
+    public var isChinese: Bool {
+        return self == .chinesePinyin || self == .chineseTraditional
+    }
+    
+    public var isKorean: Bool {
+        return self == .koreanIM
     }
 }
 

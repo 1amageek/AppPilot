@@ -18,6 +18,7 @@ public protocol AccessibilityDriver: Sendable {
     func findElement(in window: WindowHandle, role: ElementRole, title: String) async throws -> UIElement
     func elementExists(_ element: UIElement) async throws -> Bool
     func getValue(from element: UIElement) async throws -> String?
+    func setValue(_ value: String, for element: UIElement) async throws
     
     // Cache Management
     func clearElementCache(for window: WindowHandle?) async
@@ -35,6 +36,7 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
     private var appHandles: [String: AppHandleData] = [:]
     private var windowHandles: [String: WindowHandleData] = [:]
     private var elementCache: [String: [UIElement]] = [:]
+    private var elementRefs: [String: AXUIElement] = [:]  // Store AXUIElement references for live operations
     private var cacheTimeout: TimeInterval = 30.0
     private var lastCacheUpdate: Date = Date.distantPast
     
@@ -220,54 +222,6 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
         return elements[0]
     }
     
-    public func elementExists(_ element: UIElement) async throws -> Bool {
-        // For now, assume element exists if it was recently found
-        // In a real implementation, you would verify the AXUIElement is still valid
-        return true
-    }
-    
-    public func getValue(from element: UIElement) async throws -> String? {
-        // For now, return the element's value property
-        // In a real implementation, you would query the actual AXUIElement
-        return element.value
-    }
-    
-    // MARK: - Event Monitoring
-    
-    public func observeEvents(for window: WindowHandle, mask: AXMask) async -> AsyncStream<AXEvent> {
-        return AsyncStream<AXEvent> { continuation in
-            Task {
-                // Simplified implementation - would use AXObserver in real version
-                continuation.yield(AXEvent(
-                    type: .created,
-                    windowHandle: window,
-                    description: "Mock AX event"
-                ))
-                continuation.finish()
-            }
-        }
-    }
-    
-    public func checkPermission() async -> Bool {
-        return AXIsProcessTrusted()
-    }
-    
-    // MARK: - Cache Management
-    
-    public func clearElementCache(for window: WindowHandle?) async {
-        if let window = window {
-            // Clear cache for specific window
-            let keysToRemove = elementCache.keys.filter { $0.starts(with: window.id) }
-            for key in keysToRemove {
-                elementCache.removeValue(forKey: key)
-            }
-        } else {
-            // Clear all cache
-            elementCache.removeAll()
-        }
-        lastCacheUpdate = Date.distantPast
-        print("🧹 Element cache cleared for window: \(window?.id ?? "all")")
-    }
     
     // MARK: - Private Helper Methods
     
@@ -418,7 +372,7 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
         // Generate unique ID based on actual element properties
         let elementId = "\(windowHandle.id)_\(roleString)_\(depth)_\(title?.hashValue ?? identifier?.hashValue ?? Int.random(in: 1000...9999))"
         
-        return UIElement(
+        let uiElement = UIElement(
             id: elementId,
             role: role,
             title: title,
@@ -427,6 +381,11 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
             bounds: bounds,
             isEnabled: isEnabled
         )
+        
+        // Store the AXUIElement reference for live operations
+        elementRefs[elementId] = axElement
+        
+        return uiElement
     }
     
     private func getStringAttribute(from element: AXUIElement, attribute: String) -> String? {
@@ -495,6 +454,128 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
         }
         
         return CGRect.zero
+    }
+    
+    // MARK: - Element Value Operations
+    
+    public func getValue(from element: UIElement) async throws -> String? {
+        guard let axElement = elementRefs[element.id] else {
+            // Element reference not found, try to return cached value
+            return element.value
+        }
+        
+        // Get live value from the AXUIElement
+        return getStringAttribute(from: axElement, attribute: kAXValueAttribute)
+    }
+    
+    public func setValue(_ value: String, for element: UIElement) async throws {
+        guard let axElement = elementRefs[element.id] else {
+            throw PilotError.elementNotAccessible(element.id)
+        }
+        
+        // Set the value using AXUIElementSetAttributeValue
+        let result = AXUIElementSetAttributeValue(axElement, kAXValueAttribute as CFString, value as CFString)
+        
+        switch result {
+        case .success:
+            return
+        case .invalidUIElement:
+            throw PilotError.elementNotAccessible(element.id)
+        case .attributeUnsupported:
+            throw PilotError.invalidArgument("Element \(element.role.rawValue) does not support value setting")
+        case .cannotComplete:
+            throw PilotError.osFailure(api: "AXUIElementSetAttributeValue", code: Int32(result.rawValue))
+        case .notImplemented:
+            throw PilotError.osFailure(api: "AXUIElementSetAttributeValue", code: Int32(result.rawValue))
+        case .illegalArgument:
+            throw PilotError.invalidArgument("Invalid value '\(value)' for element")
+        case .failure:
+            throw PilotError.osFailure(api: "AXUIElementSetAttributeValue", code: Int32(result.rawValue))
+        default:
+            throw PilotError.osFailure(api: "AXUIElementSetAttributeValue", code: Int32(result.rawValue))
+        }
+    }
+    
+    public func elementExists(_ element: UIElement) async throws -> Bool {
+        guard let axElement = elementRefs[element.id] else {
+            return false
+        }
+        
+        // Check if the element still exists by trying to get its role
+        var roleRef: CFTypeRef?
+        let result = AXUIElementCopyAttributeValue(axElement, kAXRoleAttribute as CFString, &roleRef)
+        return result == .success
+    }
+    
+    // MARK: - Cache Management
+    
+    public func clearElementCache(for window: WindowHandle?) async {
+        if let window = window {
+            elementCache.removeValue(forKey: window.id)
+            // Also clear element references for this window
+            let keysToRemove = elementRefs.keys.filter { $0.hasPrefix(window.id) }
+            for key in keysToRemove {
+                elementRefs.removeValue(forKey: key)
+            }
+        } else {
+            elementCache.removeAll()
+            elementRefs.removeAll()
+        }
+    }
+    
+    // MARK: - Event Monitoring
+    
+    public func observeEvents(for window: WindowHandle, mask: AXMask) async -> AsyncStream<AXEvent> {
+        return AsyncStream { continuation in
+            Task {
+                guard let windowData = windowHandles[window.id] else {
+                    continuation.finish()
+                    return
+                }
+                
+                // Create AXObserver for the application (for future real implementation)
+                let _ = appHandles[windowData.appHandle.id]!
+                
+                // Simplified event monitoring implementation
+                // For now, generate mock events based on the mask
+                
+                // Schedule event generation
+                Task {
+                    for eventType in [AXEvent.EventType.created, .moved, .resized, .titleChanged, .focusChanged, .valueChanged] {
+                        // Check if this event type is requested in the mask
+                        let shouldEmit = switch eventType {
+                        case .created: mask.contains(.created)
+                        case .moved: mask.contains(.moved)
+                        case .resized: mask.contains(.resized)
+                        case .titleChanged: mask.contains(.titleChanged)
+                        case .focusChanged: mask.contains(.focusChanged)
+                        case .valueChanged: mask.contains(.valueChanged)
+                        default: false
+                        }
+                        
+                        if shouldEmit {
+                            let event = AXEvent(
+                                type: eventType,
+                                windowHandle: window,
+                                timestamp: Date(),
+                                description: "Simulated \(eventType) event"
+                            )
+                            continuation.yield(event)
+                            
+                            // Wait between events
+                            try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
+                        }
+                    }
+                    
+                    // Finish after generating sample events
+                    continuation.finish()
+                }
+            }
+        }
+    }
+    
+    public func checkPermission() async -> Bool {
+        return AXIsProcessTrusted()
     }
 }
 

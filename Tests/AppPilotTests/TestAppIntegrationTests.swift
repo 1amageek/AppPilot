@@ -347,6 +347,209 @@ struct TestAppIntegrationTests {
         print("🏁 UI tree coordinate discovery test completed")
     }
     
+    // MARK: - setValue Tests
+    
+    @Test("🎯 setValue function with TestApp text fields", .serialized)
+    func testSetValueFunctionality() async throws {
+        print("🎯 Testing setValue Function with TestApp Text Fields")
+        print("=" * 60)
+        
+        let pilot = AppPilot()
+        let testSession = try await TestSession.create(pilot: pilot, testType: .keyboard)
+        defer { Task { await testSession.cleanup() } }
+        
+        // Navigate to Keyboard tab for text field testing
+        try await testSession.navigateToTab()
+        
+        // Enhanced state isolation
+        try await Task.sleep(nanoseconds: 800_000_000) // 800ms standard wait
+        await testSession.resetState()
+        try await Task.sleep(nanoseconds: 800_000_000) // 800ms standard wait
+        
+        // Stage 1: 見る (See/Observe) - Find text fields
+        print("\n👁️ Stage 1: 見る (Discover Text Fields)")
+        let allElements = try await pilot.findElements(in: testSession.window.id)
+        let textFields = allElements.filter { $0.role == .textField }
+        
+        print("🔍 Found \(textFields.count) text fields:")
+        for (index, field) in textFields.enumerated() {
+            print("   Field \(index + 1): enabled=\(field.isEnabled) at (\(field.centerPoint.x), \(field.centerPoint.y))")
+            print("      Current value: '\(field.value ?? "empty")'")
+        }
+        
+        guard !textFields.isEmpty else {
+            throw TestSessionError.noTargetsFound
+        }
+        
+        // Stage 2: 理解する (Understand) - Select target field
+        print("\n🧠 Stage 2: 理解する (Select Target Text Field)")
+        
+        // Select an appropriate text field for testing
+        let targetField = textFields.first { $0.isEnabled } ?? textFields[0]
+        print("✅ Selected text field at (\(targetField.centerPoint.x), \(targetField.centerPoint.y))")
+        
+        // Stage 3: アクション (Action) - Test setValue functionality
+        print("\n🎬 Stage 3: アクション (Test setValue Functionality)")
+        
+        let testCases = [
+            ("Hello World", "Basic text"),
+            ("123456", "Numeric text"),
+            ("Special@#$%", "Special characters"),
+            ("日本語テスト", "Japanese text"),
+            ("", "Empty string")
+        ]
+        
+        var successfulTests = 0
+        
+        for (index, testCase) in testCases.enumerated() {
+            let (testValue, description) = testCase
+            print("\n\(index + 1)️⃣ Testing \(description): '\(testValue)'")
+            
+            // Test setValue function
+            print("   🔧 Setting value directly using setValue...")
+            let setValueResult = try await pilot.setValue(testValue, for: targetField)
+            
+            #expect(setValueResult.success, "setValue should succeed for: \(description)")
+            print("   ✅ setValue operation: \(setValueResult.success ? "SUCCESS" : "FAILED")")
+            
+            // Verify the value was set correctly
+            print("   🔍 Verifying value was set...")
+            let actualValue = try await pilot.getValue(from: targetField)
+            print("   📝 Actual value: '\(actualValue ?? "nil")'")
+            
+            // Check ActionResult data
+            if case .setValue(let inputValue, let retrievedValue) = setValueResult.data {
+                print("   📊 ActionResult data:")
+                print("      Input: '\(inputValue)'")
+                print("      Retrieved: '\(retrievedValue ?? "nil")'")
+                
+                #expect(inputValue == testValue, "Input value should match test value")
+                
+                if let retrievedValue = retrievedValue {
+                    if retrievedValue == testValue {
+                        print("   ✅ Value verification: EXACT MATCH")
+                        successfulTests += 1
+                    } else if !testValue.isEmpty && retrievedValue.contains(testValue) {
+                        print("   ✅ Value verification: PARTIAL MATCH (contains expected text)")
+                        successfulTests += 1
+                    } else {
+                        print("   ⚠️ Value verification: MISMATCH")
+                    }
+                }
+            } else {
+                print("   ❌ ActionResult data type mismatch")
+            }
+            
+            // Brief pause between test cases
+            try await Task.sleep(nanoseconds: 500_000_000) // 500ms
+        }
+        
+        print("\n📊 setValue Integration Test Results:")
+        print("   Test cases: \(testCases.count)")
+        print("   Successful: \(successfulTests)")
+        print("   Success rate: \(String(format: "%.1f", Double(successfulTests) / Double(testCases.count) * 100))%")
+        
+        #expect(successfulTests >= 3, "At least 3 setValue test cases should succeed")
+        
+        print("✅ setValue function integration test completed")
+    }
+    
+    @Test("⚡ setValue vs input performance comparison", .serialized)
+    func testSetValueVsInputPerformance() async throws {
+        print("⚡ Testing setValue vs input Performance Comparison")
+        print("=" * 60)
+        
+        let pilot = AppPilot()
+        let testSession = try await TestSession.create(pilot: pilot, testType: .keyboard)
+        defer { Task { await testSession.cleanup() } }
+        
+        try await testSession.navigateToTab()
+        
+        // Enhanced state isolation
+        try await Task.sleep(nanoseconds: 800_000_000) // 800ms standard wait
+        await testSession.resetState()
+        try await Task.sleep(nanoseconds: 800_000_000) // 800ms standard wait
+        
+        // Find text field
+        let allElements = try await pilot.findElements(in: testSession.window.id)
+        let textFields = allElements.filter { $0.role == .textField && $0.isEnabled }
+        
+        guard let targetField = textFields.first else {
+            throw TestSessionError.noTargetsFound
+        }
+        
+        let testText = "Performance Test Text 123"
+        
+        // Stage 1: 見る (See/Observe) - Measure setValue performance
+        print("\n👁️ Stage 1: 見る (Measure setValue Performance)")
+        
+        var setValueTimes: [TimeInterval] = []
+        let setValueIterations = 5
+        
+        for iteration in 1...setValueIterations {
+            print("   setValue iteration \(iteration)/\(setValueIterations)")
+            
+            let startTime = CFAbsoluteTimeGetCurrent()
+            let result = try await pilot.setValue(testText, for: targetField)
+            let endTime = CFAbsoluteTimeGetCurrent()
+            
+            let duration = endTime - startTime
+            setValueTimes.append(duration)
+            
+            #expect(result.success, "setValue should succeed in performance test")
+            print("      Duration: \(String(format: "%.3f", duration))s")
+            
+            // Brief pause between iterations
+            try await Task.sleep(nanoseconds: 200_000_000) // 200ms
+        }
+        
+        // Stage 2: 理解する (Understand) - Measure input performance
+        print("\n🧠 Stage 2: 理解する (Measure input Performance)")
+        
+        var inputTimes: [TimeInterval] = []
+        let inputIterations = 5
+        
+        for iteration in 1...inputIterations {
+            print("   input iteration \(iteration)/\(inputIterations)")
+            
+            // Clear field first
+            _ = try await pilot.click(element: targetField)
+            _ = try await pilot.keyCombination([.a], modifiers: [.command])
+            _ = try await pilot.keyCombination([.delete], modifiers: [])
+            
+            let startTime = CFAbsoluteTimeGetCurrent()
+            let result = try await pilot.input(text: testText, into: targetField)
+            let endTime = CFAbsoluteTimeGetCurrent()
+            
+            let duration = endTime - startTime
+            inputTimes.append(duration)
+            
+            #expect(result.success, "input should succeed in performance test")
+            print("      Duration: \(String(format: "%.3f", duration))s")
+            
+            // Brief pause between iterations
+            try await Task.sleep(nanoseconds: 200_000_000) // 200ms
+        }
+        
+        // Stage 3: アクション (Action) - Analyze performance results
+        print("\n🎬 Stage 3: アクション (Analyze Performance Results)")
+        
+        let avgSetValueTime = setValueTimes.reduce(0, +) / Double(setValueTimes.count)
+        let avgInputTime = inputTimes.reduce(0, +) / Double(inputTimes.count)
+        let speedImprovement = avgInputTime / avgSetValueTime
+        
+        print("📊 Performance Comparison Results:")
+        print("   setValue average: \(String(format: "%.3f", avgSetValueTime))s")
+        print("   input average: \(String(format: "%.3f", avgInputTime))s")
+        print("   Speed improvement: \(String(format: "%.1f", speedImprovement))x faster")
+        
+        // setValue should be significantly faster
+        #expect(avgSetValueTime < avgInputTime, "setValue should be faster than input")
+        #expect(speedImprovement >= 2.0, "setValue should be at least 2x faster than input")
+        
+        print("✅ setValue vs input performance comparison completed")
+    }
+    
     // MARK: - Keyboard Tests
     
     @Test("⌨️ Text input accuracy test", .serialized)
