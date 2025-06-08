@@ -19,6 +19,9 @@ public protocol AccessibilityDriver: Sendable {
     func elementExists(_ element: UIElement) async throws -> Bool
     func getValue(from element: UIElement) async throws -> String?
     
+    // Cache Management
+    func clearElementCache(for window: WindowHandle?) async
+    
     // Event Monitoring
     func observeEvents(for window: WindowHandle, mask: AXMask) async -> AsyncStream<AXEvent>
     func checkPermission() async -> Bool
@@ -247,6 +250,23 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
     
     public func checkPermission() async -> Bool {
         return AXIsProcessTrusted()
+    }
+    
+    // MARK: - Cache Management
+    
+    public func clearElementCache(for window: WindowHandle?) async {
+        if let window = window {
+            // Clear cache for specific window
+            let keysToRemove = elementCache.keys.filter { $0.starts(with: window.id) }
+            for key in keysToRemove {
+                elementCache.removeValue(forKey: key)
+            }
+        } else {
+            // Clear all cache
+            elementCache.removeAll()
+        }
+        lastCacheUpdate = Date.distantPast
+        print("🧹 Element cache cleared for window: \(window?.id ?? "all")")
     }
     
     // MARK: - Private Helper Methods

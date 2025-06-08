@@ -198,6 +198,11 @@ struct InputSourceTests {
         // Stage 2: 理解する (Understand) - Find text field
         print("\n🧠 Stage 3: 理解する (Find Text Input Field)")
         
+        // 🧹 Clear element cache to ensure fresh UI discovery after navigation
+        print("🧹 Clearing element cache for fresh UI discovery...")
+        await pilot.clearElementCache(for: testSession.window.id)
+        try await Task.sleep(nanoseconds: 500_000_000) // 500ms for cache clear
+        
         // Find text fields in the keyboard tab
         let elements = try await pilot.findElements(in: testSession.window.id)
         let textFields = elements.filter { $0.role == .textField }
@@ -206,20 +211,41 @@ struct InputSourceTests {
         for (index, field) in textFields.enumerated() {
             print("   TextField \(index + 1): enabled=\(field.isEnabled)")
             print("      Position: (\(String(format: "%.1f", field.centerPoint.x)), \(String(format: "%.1f", field.centerPoint.y)))")
+            print("      Identifier: \(field.identifier ?? "None")")
+            print("      Value: \(field.value ?? "None")")
         }
         
-        // Get text field for testing
-        guard let textField = textFields.first(where: { $0.isEnabled }) ?? textFields.first else {
+        // 🎯 Enhanced TextField selection with better targeting
+        var textField: UIElement?
+        
+        // Strategy 1: Find main input field (right panel, enabled)
+        textField = textFields.first { field in
+            field.isEnabled && 
+            field.centerPoint.x > 600 && // Right panel
+            field.bounds.width > 100      // Reasonable size
+        }
+        
+        // Strategy 2: Find any enabled field
+        if textField == nil {
+            textField = textFields.first { $0.isEnabled }
+        }
+        
+        // Strategy 3: Use first available field
+        if textField == nil {
+            textField = textFields.first
+        }
+        
+        guard let selectedTextField = textField else {
             print("❌ No text fields found on Keyboard tab")
             print("   Navigation to Keyboard tab may have failed")
             throw TestSessionError.noTargetsFound
         }
         
-        print("✅ Selected text field at: (\(String(format: "%.1f", textField.centerPoint.x)), \(String(format: "%.1f", textField.centerPoint.y)))")
+        print("✅ Selected text field at: (\(String(format: "%.1f", selectedTextField.centerPoint.x)), \(String(format: "%.1f", selectedTextField.centerPoint.y)))")
         
         // Stage 3: アクション (Action) - Test input source switching
         print("\n🎬 Stage 4: アクション (Test Input Source Switching)")
-        try await performInputSourceTestWithElement(textField, pilot: pilot, testSession: testSession)
+        try await performInputSourceTestWithElement(selectedTextField, pilot: pilot, testSession: testSession)
     }
     
     // MARK: - Input Source Integration Tests
