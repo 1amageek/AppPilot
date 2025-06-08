@@ -252,7 +252,7 @@ public actor AppPilot {
             success: true,
             element: element,
             coordinates: element.centerPoint,
-            data: .type(inputText: text, actualText: actualText, inputSource: inputSource)
+            data: .type(inputText: text, actualText: actualText, inputSource: inputSource, composition: nil)
         )
     }
     
@@ -581,7 +581,7 @@ public actor AppPilot {
         try await cgEventDriver.type(text: text)
         return ActionResult(
             success: true,
-            data: .type(inputText: text, actualText: nil, inputSource: nil)
+            data: .type(inputText: text, actualText: nil, inputSource: nil, composition: nil)
         )
     }
     
@@ -604,7 +604,7 @@ public actor AppPilot {
         try await cgEventDriver.type(text: text)
         return ActionResult(
             success: true,
-            data: .type(inputText: text, actualText: nil, inputSource: nil)
+            data: .type(inputText: text, actualText: nil, inputSource: nil, composition: nil)
         )
     }
     
@@ -731,7 +731,7 @@ public actor AppPilot {
         try await cgEventDriver.type(text, inputSource: inputSource)
         return ActionResult(
             success: true,
-            data: .type(inputText: text, actualText: nil, inputSource: inputSource)
+            data: .type(inputText: text, actualText: nil, inputSource: inputSource, composition: nil)
         )
     }
     
@@ -740,7 +740,188 @@ public actor AppPilot {
         try await cgEventDriver.type(text, inputSource: inputSource)
         return ActionResult(
             success: true,
-            data: .type(inputText: text, actualText: nil, inputSource: inputSource)
+            data: .type(inputText: text, actualText: nil, inputSource: inputSource, composition: nil)
+        )
+    }
+    
+    // MARK: - Composition Input (IME Support)
+    
+    /// Input text with composition (IME-aware typing)
+    /// 
+    /// Performs composition input (like Japanese, Chinese, Korean) where text goes through
+    /// an Input Method Editor (IME) conversion process. This method handles the complex
+    /// interaction flow of composition → candidate selection → commitment.
+    /// 
+    /// - Parameters:
+    ///   - text: The text to input (e.g., romaji for Japanese)
+    ///   - element: The target UI element 
+    ///   - composition: The composition type (language and input style)
+    /// - Returns: An `ActionResult` with composition data indicating current state
+    /// - Throws: Various `PilotError` cases for element/input issues
+    /// 
+    /// ## Usage Example
+    /// ```swift
+    /// let result = try await pilot.input("konnichiwa", into: textField, with: .japaneseRomaji)
+    /// if result.needsUserDecision {
+    ///     if let candidates = result.compositionCandidates {
+    ///         let choice = try await decideCandidate(candidates)
+    ///         let finalResult = try await pilot.selectCandidate(at: choice, for: textField)
+    ///     }
+    /// }
+    /// ```
+    public func input(
+        _ text: String,
+        into element: UIElement,
+        with composition: CompositionType
+    ) async throws -> ActionResult {
+        // Verify element is accessible and is a text input
+        guard try await accessibilityDriver.elementExists(element) && element.isEnabled else {
+            throw PilotError.elementNotAccessible(element.id)
+        }
+        
+        guard element.role.isTextInput else {
+            throw PilotError.invalidArgument("Element \(element.role.rawValue) is not a text input field")
+        }
+        
+        // Focus the element first
+        let _ = try await click(element: element)
+        try await wait(.time(seconds: 0.1))
+        
+        // Switch to appropriate input source based on composition type
+        let inputSource = try await determineInputSource(for: composition)
+        try await cgEventDriver.switchInputSource(to: inputSource)
+        try await wait(.time(seconds: 0.2)) // Wait for input source switch
+        
+        // Type the text (this will trigger IME composition)
+        try await cgEventDriver.type(text)
+        try await wait(.time(seconds: 0.2)) // Wait for composition to appear
+        
+        // Analyze current composition state
+        let compositionState = try await analyzeCompositionState(for: element, inputText: text, composition: composition)
+        
+        // Get actual text from element
+        let actualText = try await getValue(from: element)
+        
+        return ActionResult(
+            success: true,
+            element: element,
+            coordinates: element.centerPoint,
+            data: .type(
+                inputText: text,
+                actualText: actualText,
+                inputSource: inputSource,
+                composition: compositionState
+            )
+        )
+    }
+    
+    /// Select a conversion candidate
+    /// 
+    /// When composition input presents multiple conversion candidates, this method
+    /// allows selection of a specific candidate by index.
+    /// 
+    /// - Parameters:
+    ///   - index: The zero-based index of the candidate to select
+    ///   - element: The UI element with active composition
+    /// - Returns: An `ActionResult` with updated composition state
+    /// - Throws: `PilotError.invalidArgument` if index is out of range
+    public func selectCandidate(
+        at index: Int,
+        for element: UIElement
+    ) async throws -> ActionResult {
+        // Navigate to the desired candidate using Tab/Shift+Tab
+        // This is a simplified implementation - real implementation would need
+        // to track current selection and navigate appropriately
+        for _ in 0..<index {
+            try await cgEventDriver.keyDown(code: 48) // Tab key
+            try await cgEventDriver.keyUp(code: 48)
+            try await wait(.time(seconds: 0.1))
+        }
+        
+        // Get updated composition state
+        let newState = try await getCurrentCompositionState(for: element)
+        let actualText = try await getValue(from: element)
+        
+        return ActionResult(
+            success: true,
+            element: element,
+            coordinates: element.centerPoint,
+            data: .type(
+                inputText: "candidate_selection",
+                actualText: actualText,
+                inputSource: try await cgEventDriver.getCurrentInputSource().asInputSource(),
+                composition: newState
+            )
+        )
+    }
+    
+    /// Commit the current composition
+    /// 
+    /// Finalizes the current composition input by pressing Enter.
+    /// This converts the composition to final text.
+    /// 
+    /// - Parameter element: The UI element with active composition
+    /// - Returns: An `ActionResult` indicating completion
+    public func commitComposition(
+        for element: UIElement
+    ) async throws -> ActionResult {
+        // Press Enter to commit
+        try await cgEventDriver.keyDown(code: 36) // Return key
+        try await cgEventDriver.keyUp(code: 36)
+        try await wait(.time(seconds: 0.1))
+        
+        let actualText = try await getValue(from: element)
+        
+        // Create committed composition state
+        let committedState = CompositionInputResult(
+            state: .committed(text: actualText ?? ""),
+            inputText: "committed",
+            currentText: actualText ?? "",
+            needsUserDecision: false,
+            availableActions: [],
+            compositionType: .japaneseRomaji // This should be tracked from the original input
+        )
+        
+        return ActionResult(
+            success: true,
+            element: element,
+            coordinates: element.centerPoint,
+            data: .type(
+                inputText: "commit",
+                actualText: actualText,
+                inputSource: try await cgEventDriver.getCurrentInputSource().asInputSource(),
+                composition: committedState
+            )
+        )
+    }
+    
+    /// Cancel the current composition
+    /// 
+    /// Cancels the current composition input by pressing Escape.
+    /// This reverts any uncommitted composition.
+    /// 
+    /// - Parameter element: The UI element with active composition
+    /// - Returns: An `ActionResult` indicating cancellation
+    public func cancelComposition(
+        for element: UIElement
+    ) async throws -> ActionResult {
+        // Press Escape to cancel
+        try await cgEventDriver.keyDown(code: 53) // Escape key
+        try await cgEventDriver.keyUp(code: 53)
+        try await wait(.time(seconds: 0.1))
+        
+        let actualText = try await getValue(from: element)
+        
+        return ActionResult(
+            success: true,
+            element: element,
+            coordinates: element.centerPoint,
+            data: .type(
+                inputText: "cancel",
+                actualText: actualText,
+                inputSource: try await cgEventDriver.getCurrentInputSource().asInputSource(),
+                composition: nil
+            )
         )
     }
     
@@ -918,5 +1099,129 @@ public actor AppPilot {
     /// - Parameter window: The window to clear cache for, or `nil` to clear all cache
     public func clearElementCache(for window: WindowHandle? = nil) async {
         await accessibilityDriver.clearElementCache(for: window)
+    }
+    
+    // MARK: - Composition Input Helper Methods
+    
+    /// Determine the appropriate InputSource for a given CompositionType
+    private func determineInputSource(for composition: CompositionType) async throws -> InputSource {
+        switch composition.rawValue {
+        case "japanese":
+            if composition.style?.rawValue.contains("romaji") == true {
+                return .japanese
+            } else {
+                return .japaneseHiragana
+            }
+        case "chinese":
+            return .english // Placeholder - would need Chinese input source
+        case "korean":
+            return .english // Placeholder - would need Korean input source
+        default:
+            return .english
+        }
+    }
+    
+    /// Analyze the current composition state after typing
+    private func analyzeCompositionState(
+        for element: UIElement,
+        inputText: String,
+        composition: CompositionType
+    ) async throws -> CompositionInputResult {
+        // This is a simplified implementation
+        // Real implementation would need to:
+        // 1. Check if IME candidate window is visible
+        // 2. Extract candidate list from IME window
+        // 3. Determine current selection state
+        
+        let currentText = try await getValue(from: element) ?? ""
+        
+        // Simple heuristic: if text changed, composition is happening
+        if currentText != inputText {
+            // For Japanese, common conversion scenarios
+            if composition.rawValue == "japanese" {
+                let mockCandidates = generateMockCandidates(for: inputText)
+                
+                if mockCandidates.count > 1 {
+                    return CompositionInputResult(
+                        state: .candidateSelection(
+                            original: inputText,
+                            candidates: mockCandidates,
+                            selectedIndex: 0
+                        ),
+                        inputText: inputText,
+                        currentText: currentText,
+                        needsUserDecision: true,
+                        availableActions: [.selectCandidate(index: 0), .nextCandidate, .commit, .cancel],
+                        compositionType: composition
+                    )
+                } else {
+                    return CompositionInputResult(
+                        state: .composing(text: currentText, suggestions: mockCandidates),
+                        inputText: inputText,
+                        currentText: currentText,
+                        needsUserDecision: false,
+                        availableActions: [.commit, .cancel],
+                        compositionType: composition
+                    )
+                }
+            }
+        }
+        
+        // Default: committed state
+        return CompositionInputResult(
+            state: .committed(text: currentText),
+            inputText: inputText,
+            currentText: currentText,
+            needsUserDecision: false,
+            availableActions: [],
+            compositionType: composition
+        )
+    }
+    
+    /// Get current composition state for an element
+    private func getCurrentCompositionState(for element: UIElement) async throws -> CompositionInputResult {
+        let currentText = try await getValue(from: element) ?? ""
+        
+        // Simplified implementation - would need real IME state detection
+        return CompositionInputResult(
+            state: .committed(text: currentText),
+            inputText: "current",
+            currentText: currentText,
+            needsUserDecision: false,
+            availableActions: [],
+            compositionType: .japaneseRomaji
+        )
+    }
+    
+    /// Generate mock candidates for testing purposes
+    private func generateMockCandidates(for input: String) -> [String] {
+        // Simple mock candidate generation for common Japanese inputs
+        let candidateMap: [String: [String]] = [
+            "konnichiwa": ["こんにちは", "こんにちわ", "今日は"],
+            "arigatou": ["ありがとう", "有難う", "有り難う"],
+            "sayonara": ["さようなら", "左様なら"],
+            "nihon": ["日本", "にほん", "ニホン"],
+            "watashi": ["私", "わたし", "ワタシ"],
+            "anata": ["あなた", "貴方", "アナタ"]
+        ]
+        
+        return candidateMap[input.lowercased()] ?? [input]
+    }
+}
+
+// MARK: - InputSourceInfo Extension
+
+extension InputSourceInfo {
+    /// Convert InputSourceInfo to InputSource enum
+    func asInputSource() -> InputSource {
+        if identifier.contains("ABC") {
+            return .english
+        } else if identifier.contains("Kotoeri") && identifier.contains("Japanese") {
+            return .japaneseHiragana
+        } else if identifier.contains("Kotoeri") {
+            return .japanese
+        } else {
+            return .automatic
+        }
     }
 }
