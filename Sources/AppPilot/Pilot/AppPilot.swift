@@ -203,6 +203,59 @@ public actor AppPilot {
     
     // MARK: - Element-Based Actions
     
+    /// Input text into UI element with verification
+    /// 
+    /// Types text into a specific UI element and returns the actual text that was entered.
+    /// This is the recommended method for text input as it provides reliable targeting
+    /// and result verification.
+    /// 
+    /// - Parameters:
+    ///   - text: The text to input
+    ///   - element: The target UI element (must be a text input field)
+    ///   - inputSource: The input source to use (default: .automatic)
+    /// - Returns: An `ActionResult` containing both input text and actual text
+    /// - Throws: `PilotError.elementNotAccessible` if element is invalid or `PilotError.invalidArgument` if element is not a text input
+    public func input(
+        text: String,
+        into element: UIElement,
+        inputSource: InputSource = .automatic
+    ) async throws -> ActionResult {
+        // Verify element is accessible and is a text input
+        guard try await accessibilityDriver.elementExists(element) && element.isEnabled else {
+            throw PilotError.elementNotAccessible(element.id)
+        }
+        
+        guard element.role.isTextInput else {
+            throw PilotError.invalidArgument("Element \(element.role.rawValue) is not a text input field")
+        }
+        
+        // Click the element first to focus it
+        let _ = try await click(element: element)
+        
+        // Wait a moment for focus to be established
+        try await wait(.time(seconds: 0.1))
+        
+        // Type the text using the appropriate method
+        if inputSource == .automatic {
+            try await cgEventDriver.type(text: text)
+        } else {
+            try await cgEventDriver.type(text, inputSource: inputSource)
+        }
+        
+        // Wait for input to complete
+        try await wait(.time(seconds: 0.2))
+        
+        // Get actual text from element
+        let actualText = try await getValue(from: element)
+        
+        return ActionResult(
+            success: true,
+            element: element,
+            coordinates: element.centerPoint,
+            data: .type(inputText: text, actualText: actualText, inputSource: inputSource)
+        )
+    }
+    
     /// Click UI element (automatically calculates center point)
     public func click(element: UIElement) async throws -> ActionResult {
         // Verify element is still accessible and enabled
@@ -224,41 +277,6 @@ public actor AppPilot {
         )
     }
     
-    /// Type text into UI element
-    public func type(text: String, into element: UIElement, verifyInput: Bool = true) async throws -> ActionResult {
-        // Verify element is accessible and is a text input
-        guard try await accessibilityDriver.elementExists(element) && element.isEnabled else {
-            throw PilotError.elementNotAccessible(element.id)
-        }
-        
-        guard element.role.isTextInput else {
-            throw PilotError.invalidArgument("Element \(element.role.rawValue) is not a text input field")
-        }
-        
-        // Click the element first to focus it
-        let _ = try await click(element: element)
-        
-        // Wait a moment for focus to be established
-        try await wait(.time(seconds: 0.1))
-        
-        // Type the text
-        try await cgEventDriver.type(text: text)
-        
-        // Input verification
-        var actualText: String? = nil
-        
-        if verifyInput {
-            try await wait(.time(seconds: 0.2))
-            actualText = try await getValue(from: element)
-        }
-        
-        return ActionResult(
-            success: true,
-            element: element,
-            coordinates: element.centerPoint,
-            data: .type(inputText: text, actualText: actualText, inputSource: nil)
-        )
-    }
     
     /// Get value from UI element
     /// 
@@ -366,7 +384,7 @@ public actor AppPilot {
             
             throw PilotError.timeout(timeout)
             
-        case .uiChange(let window, let timeout):
+        case .uiChange(_, let timeout):
             // Simplified implementation - just wait for time
             try await wait(.time(seconds: min(timeout, 5.0)))
         }
@@ -420,7 +438,7 @@ public actor AppPilot {
         }
         
         // Activate the target application
-        let activated = nsApp.activate(options: [.activateIgnoringOtherApps])
+        let activated = nsApp.activate()
         
         if activated {
             // Wait for activation to complete
@@ -561,7 +579,10 @@ public actor AppPilot {
     ) async throws -> ActionResult {
         try await ensureTargetAppFocus(for: window)
         try await cgEventDriver.type(text: text)
-        return ActionResult(success: true)
+        return ActionResult(
+            success: true,
+            data: .type(inputText: text, actualText: nil, inputSource: nil)
+        )
     }
     
     /// Type text to currently focused application (fallback)
@@ -581,7 +602,10 @@ public actor AppPilot {
     ///   which may not be the intended target.
     public func type(text: String) async throws -> ActionResult {
         try await cgEventDriver.type(text: text)
-        return ActionResult(success: true)
+        return ActionResult(
+            success: true,
+            data: .type(inputText: text, actualText: nil, inputSource: nil)
+        )
     }
     
     /// Drag operation (safe version with window context)
@@ -705,13 +729,19 @@ public actor AppPilot {
     ) async throws -> ActionResult {
         try await ensureTargetAppFocus(for: window)
         try await cgEventDriver.type(text, inputSource: inputSource)
-        return ActionResult(success: true)
+        return ActionResult(
+            success: true,
+            data: .type(inputText: text, actualText: nil, inputSource: inputSource)
+        )
     }
     
     /// Type text with specific input source (fallback)
     public func type(text: String, inputSource: InputSource) async throws -> ActionResult {
         try await cgEventDriver.type(text, inputSource: inputSource)
-        return ActionResult(success: true)
+        return ActionResult(
+            success: true,
+            data: .type(inputText: text, actualText: nil, inputSource: inputSource)
+        )
     }
     
     /// Scroll operation (safe version with window context)

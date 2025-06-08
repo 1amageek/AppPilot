@@ -116,7 +116,6 @@ public extension CGEventDriver {
         try await mouseUp(button: button,   at: p)
     }
     
-    // v3.0 Compatibility methods
     func click(at point: Point, button: MouseButton = .left, count: Int = 1) async throws {
         for _ in 0..<count {
             try await click(at: point, button: button)
