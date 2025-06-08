@@ -744,7 +744,7 @@ struct TestAppIntegrationTests {
             print("⌨️ Testing text input...")
             let inputResult = try await pilot.input(text: "AppPilot SDK Test", into: textField)
             print("✅ Text input result: \(inputResult.success)")
-            if case .type(let inputText, let actualText, _) = inputResult.data {
+            if case .type(let inputText, let actualText, _, _) = inputResult.data {
                 print("   Input: \(inputText), Actual: \(actualText ?? "nil")")
             }
             #expect(inputResult.success, "Text input should succeed")
