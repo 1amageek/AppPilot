@@ -404,8 +404,8 @@ struct TestAppIntegrationTests {
             print("✅ Already on Keyboard tab")
         }
         
-        // Stage 2: 理解する (Understand) - Find text field
-        print("\n🧠 Stage 2: 理解する (Find Text Input Field)")
+        // Stage 2: 理解する (Understand) - Find text input fields for simplified keyboard test
+        print("\n🧠 Stage 2: 理解する (Find Simplified Keyboard Test Fields)")
         
         // Refresh elements after potential navigation
         let updatedElements = try await pilot.findElements(in: testSession.window.id)
@@ -419,78 +419,86 @@ struct TestAppIntegrationTests {
             print("   TextField \(index + 1): enabled=\(field.isEnabled) bounds=\(field.bounds)")
         }
         
-        guard let mainTextField = textFields.first(where: { $0.centerPoint.x > 700 }) ?? textFields.first else {
+        // For simplified keyboard test, look for the "Expected Text" field first
+        guard let expectedTextField = textFields.first else {
             throw TestSessionError.noTargetsFound
         }
         
-        // Stage 3: アクション (Action) - Simplified Keyboard Test
+        // Find the actual input field (second text field in simplified layout)
+        let actualTextField = textFields.count > 1 ? textFields[1] : expectedTextField
+        
+        // Stage 3: アクション (Action) - Simplified Keyboard Test Workflow
         print("\n🎬 Stage 3: アクション (Simplified Keyboard Test Workflow)")
         
-        // ⭐ Enhanced Text Field Interaction
-        print("1️⃣ Activating text field...")
-        
-        // Try to enable the text field by clicking on it multiple times if needed
-        for attempt in 1...3 {
-            print("   Attempt \(attempt): Clicking on text field...")
-            let clickResult = try await pilot.click(window: testSession.window.id, at: mainTextField.centerPoint)
-            #expect(clickResult.success, "Text field click should succeed")
-            try await Task.sleep(nanoseconds: 800_000_000) // 800ms standard wait
-            
-            // Check if field is now responsive
-            let updatedField = try await pilot.findElements(in: testSession.window.id)
-                .filter { $0.role == .textField }
-                .first { $0.centerPoint.x > 700 } ?? mainTextField
-            
-            if updatedField.isEnabled {
-                print("   ✅ Text field is now enabled")
-                break
-            } else if attempt == 3 {
-                print("   ⚠️ Text field still not enabled, proceeding anyway")
-            }
-        }
-        
-        // ⭐ Enhanced Text Input Testing
-        print("2️⃣ Testing text input...")
-        
         let testText = "Hello123"
-        print("   Typing: '\(testText)'")
         
-        let typeResult = try await pilot.type(text: testText)
-        #expect(typeResult.success, "Text typing should succeed")
-        
-        // ⭐ Enhanced Verification with multiple checks
+        // Step 1: Enter expected text in the first field
+        print("1️⃣ Setting up expected text...")
+        print("   Clicking on expected text field...")
+        let expectedClickResult = try await pilot.click(window: testSession.window.id, at: expectedTextField.centerPoint)
+        #expect(expectedClickResult.success, "Expected text field click should succeed")
         try await Task.sleep(nanoseconds: 800_000_000) // 800ms standard wait
         
-        print("3️⃣ Verifying text input...")
+        print("   Typing expected text: '\(testText)'")
+        let expectedTypeResult = try await pilot.type(text: testText)
+        #expect(expectedTypeResult.success, "Expected text typing should succeed")
+        try await Task.sleep(nanoseconds: 800_000_000) // 800ms standard wait
         
-        // Check multiple ways
-        var inputDetected = false
+        // Step 2: Find and click the "Start Test" button
+        print("2️⃣ Starting the test...")
+        let buttonElements = try await pilot.findElements(in: testSession.window.id)
+        let startButton = buttonElements.first { element in
+            element.role == ElementRole.button && 
+            (element.title?.contains("Start Test") ?? false)
+        }
         
-        // Method 1: Check text field value via accessibility
+        if let startButton = startButton {
+            print("   Clicking Start Test button...")
+            let startResult = try await pilot.click(window: testSession.window.id, at: startButton.centerPoint)
+            #expect(startResult.success, "Start Test button click should succeed")
+            try await Task.sleep(nanoseconds: 800_000_000) // 800ms standard wait
+        } else {
+            print("   ⚠️ Start Test button not found, proceeding with direct field interaction")
+        }
+        
+        // Step 3: Type in the actual text field
+        print("3️⃣ Testing actual text input...")
+        print("   Clicking on actual input field...")
+        let actualClickResult = try await pilot.click(window: testSession.window.id, at: actualTextField.centerPoint)
+        #expect(actualClickResult.success, "Actual text field click should succeed")
+        try await Task.sleep(nanoseconds: 800_000_000) // 800ms standard wait
+        
+        print("   Typing actual text: '\(testText)'")
+        let actualTypeResult = try await pilot.type(text: testText)
+        #expect(actualTypeResult.success, "Actual text typing should succeed")
+        try await Task.sleep(nanoseconds: 800_000_000) // 800ms standard wait
+        
+        // Step 4: Verification
+        print("4️⃣ Verifying text input...")
+        
+        // Check if test auto-completed (simplified KeyboardTestView has auto-completion)
         let finalElements = try await pilot.findElements(in: testSession.window.id)
-        let finalTextField = finalElements.filter { element in
-            element.role == .textField
-        }.first(where: { $0.centerPoint.x > 700 }) ?? finalElements.filter { $0.role == .textField }.first
+        let finalTextFields = finalElements.filter { $0.role == .textField }
         
-        if let textFieldValue = finalTextField?.value {
-            print("   📝 Text field value: \"\(textFieldValue)\"")
-            if textFieldValue.contains("Hello") || textFieldValue.contains("123") || !textFieldValue.isEmpty {
-                print("   ✅ Input verification: TEXT DETECTED")
-                inputDetected = true
+        var inputDetected = false
+        if finalTextFields.count >= 2 {
+            let actualField = finalTextFields[1]
+            if let actualValue = actualField.value {
+                print("   📝 Actual field value: \"\(actualValue)\"")
+                if actualValue.contains("Hello") || actualValue.contains("123") || !actualValue.isEmpty {
+                    print("   ✅ Input verification: TEXT DETECTED")
+                    inputDetected = true
+                }
             }
         }
         
-        // Method 2: API verification if available
-        print("   🔄 Additional API verification...")
-        // For keyboard tests, we rely on the typing operation success and UI state
-        
-        print("\n📊 Text Input Test Results:")
-        print("   Navigation: ✅")
-        print("   Field Activation: ✅")
-        print("   Text Typing: ✅")
+        print("\n📊 Simplified Keyboard Test Results:")
+        print("   Expected Text Setup: ✅")
+        print("   Test Activation: ✅")
+        print("   Actual Text Input: ✅")
         print("   Input Detection: \(inputDetected ? "✅" : "⚠️")")
         
-        #expect(typeResult.success, "Text typing operation should succeed")
+        #expect(actualTypeResult.success, "Text typing operation should succeed")
         
         print("🏁 Text input accuracy test completed")
     }
@@ -731,11 +739,22 @@ struct TestAppIntegrationTests {
             #expect(clickResult.success, "Click operation should succeed")
         }
         
-        // Test text typing
-        print("⌨️ Testing text typing...")
-        let typeResult = try await pilot.type(text: "AppPilot SDK Test")
-        print("✅ Text typing result: \(typeResult.success)")
-        #expect(typeResult.success, "Text typing should succeed")
+        // Test text typing with input function if text field available
+        if let textField = textFields.first {
+            print("⌨️ Testing text input...")
+            let inputResult = try await pilot.input(text: "AppPilot SDK Test", into: textField)
+            print("✅ Text input result: \(inputResult.success)")
+            if case .type(let inputText, let actualText, _) = inputResult.data {
+                print("   Input: \(inputText), Actual: \(actualText ?? "nil")")
+            }
+            #expect(inputResult.success, "Text input should succeed")
+        } else {
+            // Fallback to generic type for non-text-field testing
+            print("⌨️ Testing generic text typing...")
+            let typeResult = try await pilot.type(text: "AppPilot SDK Test")
+            print("✅ Text typing result: \(typeResult.success)")
+            #expect(typeResult.success, "Text typing should succeed")
+        }
         
         // Test wait operation
         print("⏰ Testing wait operation...")
@@ -984,7 +1003,7 @@ struct TestAppIntegrationTests {
             let beforeState = await testSession.getClickTargets()
             let beforeCount = beforeState.filter { $0.clicked }.count
             
-            let result = try await pilot.click(window: currentWindow.id, at: firstTarget.centerPoint, button: .left, count: 1)
+            let _ = try await pilot.click(window: currentWindow.id, at: firstTarget.centerPoint, button: .left, count: 1)
             
             try await pilot.wait(.time(seconds: 1.5))
             

@@ -816,42 +816,6 @@ public actor AppPilot {
         return ActionResult(success: true, coordinates: point)
     }
     
-    /// Type text into specific element with input source
-    public func type(text: String, into element: UIElement, inputSource: InputSource, verifyInput: Bool = true) async throws -> ActionResult {
-        // Verify element is accessible and is a text input
-        guard try await accessibilityDriver.elementExists(element) && element.isEnabled else {
-            throw PilotError.elementNotAccessible(element.id)
-        }
-        
-        guard element.role.isTextInput else {
-            throw PilotError.invalidArgument("Element \(element.role.rawValue) is not a text input field")
-        }
-        
-        // Click the element first to focus it
-        let _ = try await click(element: element)
-        
-        // Wait a moment for focus to be established
-        try await wait(.time(seconds: 0.1))
-        
-        // Type with input source
-        try await cgEventDriver.type(text, inputSource: inputSource)
-        
-        // Input verification
-        var actualText: String? = nil
-        
-        if verifyInput {
-            try await wait(.time(seconds: 0.2))
-            actualText = try await getValue(from: element)
-        }
-        
-        return ActionResult(
-            success: true,
-            element: element,
-            coordinates: element.centerPoint,
-            data: .type(inputText: text, actualText: actualText, inputSource: inputSource)
-        )
-    }
-    
     /// Perform gesture from one point to another (safe version with window context)
     /// 
     /// Performs a gesture operation with automatic app focus management.
@@ -933,42 +897,6 @@ public actor AppPilot {
             coordinates: element.centerPoint
         )
     }
-    
-    /// Type text into a specific UI element (focuses first)
-    public func typeIntoElement(_ element: UIElement, text: String, in window: WindowHandle, verifyInput: Bool = true) async throws -> ActionResult {
-        print("⌨️ AppPilot: Typing into element \(element.role): \(element.title ?? element.id)")
-        print("   Text: \(text.prefix(50))\(text.count > 50 ? "..." : "")")
-        
-        // Ensure target app is focused before any operations
-        try await ensureTargetAppFocus(for: window)
-        
-        // First click on the element to focus it
-        let clickResult = try await clickElement(element, in: window)
-        guard clickResult.success else {
-            throw PilotError.elementNotAccessible("Could not focus element for typing")
-        }
-        
-        // Wait a bit for focus
-        try await wait(.time(seconds: 0.2))
-        
-        // Then type the text
-        let typeResult = try await type(text: text)
-        
-        // Input verification if requested
-        var actualText: String? = nil
-        
-        if verifyInput {
-            try await wait(.time(seconds: 0.2))
-            actualText = try await getValue(from: element)
-        }
-        
-        return ActionResult(
-            success: typeResult.success,
-            coordinates: element.centerPoint,
-            data: .type(inputText: text, actualText: actualText, inputSource: nil)
-        )
-    }
-    
     
     /// Key combination support
     public func keyCombination(_ keys: [VirtualKey], modifiers: [ModifierKey]) async throws -> ActionResult {

@@ -4,270 +4,154 @@ struct KeyboardTestView: View {
     let testResultsManager: TestResultsManager
     let testStateManager: TestStateManager
     
-    @State private var selectedTestCase: KeyboardTestCase?
     @State private var expectedText: String = ""
     @State private var actualText: String = ""
     @State private var isTestActive: Bool = false
-    @State private var customInput: String = ""
-    @State private var useCustomInput: Bool = false
     
     var body: some View {
-        HStack(spacing: 20) {
-            // Left panel - Controls and presets
-            VStack(alignment: .leading, spacing: 20) {
-                controlsSection
-                presetsSection
-                statisticsSection
-                Spacer()
-            }
-            .frame(width: 300)
-            .padding()
-            
-            Divider()
-            
-            // Right panel - Test area
-            VStack(alignment: .leading, spacing: 20) {
-                testAreaHeader
-                expectedTextSection
-                actualTextSection
-                comparisonSection
-                actionButtons
-                Spacer()
-            }
-            .padding()
-            .frame(maxWidth: .infinity)
-        }
-    }
-    
-    private var controlsSection: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Test Controls")
-                .font(.headline)
-            
-            Toggle("Use Custom Input", isOn: $useCustomInput)
-                .accessibilityIdentifier("use_custom_input_toggle")
-            
-            if useCustomInput {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Custom Text")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                    
-                    TextField("Enter text to test", text: $customInput)
-                        .textFieldStyle(RoundedBorderTextFieldStyle())
-                        .onChange(of: customInput) { _, newValue in
-                            if useCustomInput {
-                                expectedText = newValue
-                                selectedTestCase = nil
-                            }
-                        }
-                }
-            }
-            
-            HStack {
-                Button("Start Test") {
-                    startTest()
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(expectedText.isEmpty)
+        VStack(spacing: 30) {
+            // Header
+            VStack(spacing: 8) {
+                Text("Keyboard Input Test")
+                    .font(.title2)
+                    .fontWeight(.semibold)
                 
-                Button("Clear") {
-                    clearTest()
-                }
-                .buttonStyle(.bordered)
+                Text("Enter expected text, start the test, then type to verify input accuracy")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
             }
+            
+            // Main test area
+            VStack(spacing: 24) {
+                expectedTextInput
+                actualTextInput
+                resultDisplay
+            }
+            .padding()
+            .background(Color.gray.opacity(0.05))
+            .cornerRadius(12)
+            
+            // Action buttons
+            actionButtons
+            
+            Spacer()
         }
         .padding()
-        .background(Color.gray.opacity(0.05))
-        .cornerRadius(10)
+        .frame(maxWidth: 600)
     }
     
-    private var presetsSection: some View {
+    private var expectedTextInput: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Test Presets")
+            Label("Expected Text", systemImage: "text.quote")
                 .font(.headline)
+                .foregroundColor(.primary)
             
-            ScrollView {
-                LazyVStack(spacing: 8) {
-                    ForEach(KeyboardTestCase.presets) { testCase in
-                        presetRow(testCase)
+            TextField("Enter the text you want to test typing...", text: $expectedText, axis: .vertical)
+                .textFieldStyle(.plain)
+                .padding()
+                .background(Color.gray.opacity(0.1))
+                .cornerRadius(8)
+                .frame(minHeight: 80)
+                .disabled(isTestActive)
+        }
+    }
+    
+    private var actualTextInput: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Label("Actual Input", systemImage: "keyboard")
+                    .font(.headline)
+                    .foregroundColor(.primary)
+                
+                Spacer()
+                
+                if isTestActive {
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(Color.green)
+                            .frame(width: 8, height: 8)
+                        Text("Test Active")
+                            .font(.caption)
+                            .foregroundColor(.green)
                     }
                 }
             }
-            .frame(maxHeight: 200)
-        }
-        .padding()
-        .background(Color.gray.opacity(0.05))
-        .cornerRadius(10)
-    }
-    
-    private func presetRow(_ testCase: KeyboardTestCase) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(testCase.name)
-                        .font(.subheadline)
-                        .fontWeight(.medium)
-                    
-                    Text(testCase.description)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-                
-                Spacer()
-                
-                if selectedTestCase?.id == testCase.id {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundColor(.blue)
-                }
-            }
             
-            Text("Input: \"\(testCase.input.replacingOccurrences(of: "\n", with: "\\n").replacingOccurrences(of: "\t", with: "\\t"))\"")
-                .font(.caption2)
-                .foregroundColor(.secondary)
-                .padding(.top, 2)
-        }
-        .padding()
-        .background(selectedTestCase?.id == testCase.id ? Color.blue.opacity(0.1) : Color.clear)
-        .cornerRadius(8)
-        .onTapGesture {
-            selectPreset(testCase)
-        }
-    }
-    
-    private var statisticsSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Statistics")
-                .font(.headline)
-            
-            let results = testResultsManager.getResults(for: .keyboard)
-            let successRate = testResultsManager.getSuccessRate(for: .keyboard)
-            
-            HStack {
-                Text("Total Tests:")
-                Spacer()
-                Text("\(results.count)")
-                    .fontWeight(.semibold)
-            }
-            
-            HStack {
-                Text("Success Rate:")
-                Spacer()
-                Text("\(Int(successRate * 100))%")
-                    .fontWeight(.semibold)
-                    .foregroundColor(successRate > 0.8 ? .green : successRate > 0.5 ? .orange : .red)
-            }
-            
-            if let lastResult = results.first {
-                HStack {
-                    Text("Last Test:")
-                    Spacer()
-                    Image(systemName: lastResult.success ? "checkmark.circle.fill" : "xmark.circle.fill")
-                        .foregroundColor(lastResult.success ? .green : .red)
-                }
-            }
-        }
-        .padding()
-        .background(Color.gray.opacity(0.05))
-        .cornerRadius(10)
-    }
-    
-    private var testAreaHeader: some View {
-        HStack {
-            Text("Keyboard Input Test")
-                .font(.title2)
-            
-            Spacer()
-            
-            if isTestActive {
-                HStack {
-                    ProgressView()
-                        .scaleEffect(0.8)
-                    Text("Test Active - Type in the field below")
-                        .font(.caption)
-                        .foregroundColor(.blue)
-                }
-            }
-        }
-    }
-    
-    private var expectedTextSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Expected Text")
-                .font(.headline)
-                .foregroundColor(.secondary)
-            
-            ScrollView {
-                Text(expectedText.isEmpty ? "No test selected" : expectedText)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding()
-                    .background(Color.gray.opacity(0.1))
-                    .cornerRadius(8)
-            }
-            .frame(height: 80)
-        }
-    }
-    
-    private var actualTextSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Actual Input (Type here when test is active)")
-                .font(.headline)
-            
-            TextField("", text: $actualText, axis: .vertical)
+            TextField("Type here when test is active...", text: $actualText, axis: .vertical)
                 .textFieldStyle(.plain)
                 .padding()
-                .background(isTestActive ? Color.blue.opacity(0.1) : Color.gray.opacity(0.1))
+                .background(isTestActive ? Color.blue.opacity(0.05) : Color.gray.opacity(0.1))
                 .cornerRadius(8)
-                .border(isTestActive ? Color.blue : Color.clear, width: 2)
-                .frame(height: 80)
+                .frame(minHeight: 80)
                 .disabled(!isTestActive)
                 .onChange(of: actualText) { _, newValue in
-                    if isTestActive && newValue == expectedText {
+                    if isTestActive && newValue == expectedText && !expectedText.isEmpty {
+                        // Auto-complete when text matches
                         completeTest(success: true)
                     }
                 }
         }
     }
     
-    private var comparisonSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Comparison")
-                .font(.headline)
-            
-            if !expectedText.isEmpty || !actualText.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack {
-                        Text("Length:")
-                        Spacer()
-                        Text("Expected: \(expectedText.count), Actual: \(actualText.count)")
-                            .foregroundColor(expectedText.count == actualText.count ? .green : .red)
-                    }
-                    
-                    HStack {
-                        Text("Match:")
-                        Spacer()
-                        if actualText == expectedText {
-                            Label("Perfect Match", systemImage: "checkmark.circle.fill")
-                                .foregroundColor(.green)
-                        } else if actualText.isEmpty {
-                            Text("No input yet")
-                                .foregroundColor(.secondary)
-                        } else {
-                            Label("Mismatch", systemImage: "xmark.circle.fill")
-                                .foregroundColor(.red)
-                        }
-                    }
-                    
-                    if !actualText.isEmpty && actualText != expectedText {
-                        Text("First difference at position: \(findFirstDifference())")
-                            .font(.caption)
-                            .foregroundColor(.orange)
-                    }
-                }
-            } else {
-                Text("No comparison data")
+    private var resultDisplay: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            // Match status
+            HStack {
+                Label("Status", systemImage: "checkmark.circle")
+                    .font(.subheadline)
                     .foregroundColor(.secondary)
-                    .italic()
+                
+                Spacer()
+                
+                if actualText.isEmpty && expectedText.isEmpty {
+                    Text("Enter expected text to begin")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                } else if actualText.isEmpty {
+                    Text("No input yet")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                } else if actualText == expectedText {
+                    Label("Perfect Match!", systemImage: "checkmark.circle.fill")
+                        .font(.subheadline)
+                        .foregroundColor(.green)
+                } else {
+                    Label("Mismatch", systemImage: "xmark.circle.fill")
+                        .font(.subheadline)
+                        .foregroundColor(.red)
+                }
+            }
+            
+            // Character count comparison
+            if !expectedText.isEmpty || !actualText.isEmpty {
+                HStack {
+                    Label("Characters", systemImage: "character.cursor.ibeam")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                    
+                    Spacer()
+                    
+                    Text("\(actualText.count) / \(expectedText.count)")
+                        .font(.subheadline)
+                        .monospacedDigit()
+                        .foregroundColor(actualText.count == expectedText.count ? .primary : .orange)
+                }
+            }
+            
+            // Show first difference if there's a mismatch
+            if !actualText.isEmpty && actualText != expectedText && !expectedText.isEmpty {
+                let diffPosition = findFirstDifference()
+                HStack {
+                    Label("First difference", systemImage: "exclamationmark.triangle")
+                        .font(.caption)
+                        .foregroundColor(.orange)
+                    
+                    Spacer()
+                    
+                    Text("Position \(diffPosition + 1)")
+                        .font(.caption)
+                        .foregroundColor(.orange)
+                }
             }
         }
         .padding()
@@ -276,40 +160,38 @@ struct KeyboardTestView: View {
     }
     
     private var actionButtons: some View {
-        HStack {
+        HStack(spacing: 12) {
             if isTestActive {
-                Button("Complete Test") {
-                    completeTest(success: actualText == expectedText)
-                }
-                .buttonStyle(.borderedProminent)
-                
-                Button("Cancel Test") {
-                    cancelTest()
+                Button(action: cancelTest) {
+                    Label("Cancel", systemImage: "xmark.circle")
                 }
                 .buttonStyle(.bordered)
+                .controlSize(.large)
+                
+                Button(action: { completeTest(success: actualText == expectedText) }) {
+                    Label("Complete Test", systemImage: "checkmark.circle")
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
             } else {
-                Button("Verify Match") {
-                    verifyMatch()
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(expectedText.isEmpty || actualText.isEmpty)
-                
-                Button("Reset") {
-                    resetTest()
+                Button(action: clearAll) {
+                    Label("Clear All", systemImage: "trash")
                 }
                 .buttonStyle(.bordered)
+                .controlSize(.large)
+                .disabled(expectedText.isEmpty && actualText.isEmpty)
+                
+                Button(action: startTest) {
+                    Label("Start Test", systemImage: "play.fill")
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .disabled(expectedText.isEmpty)
             }
         }
     }
     
-    private func selectPreset(_ testCase: KeyboardTestCase) {
-        selectedTestCase = testCase
-        expectedText = testCase.input
-        useCustomInput = false
-        customInput = ""
-        actualText = ""
-        isTestActive = false
-    }
+    // MARK: - Actions
     
     private func startTest() {
         actualText = ""
@@ -319,11 +201,9 @@ struct KeyboardTestView: View {
     private func completeTest(success: Bool) {
         isTestActive = false
         
-        let testName = selectedTestCase?.name ?? "Custom Input"
-        
         // Record in testStateManager for API access
         testStateManager.recordKeyboardTest(
-            testName: testName,
+            testName: "Manual Test",
             expected: expectedText,
             actual: actualText
         )
@@ -332,7 +212,7 @@ struct KeyboardTestView: View {
         let result = TestResult(
             testType: .keyboard,
             success: success,
-            details: "\(testName) - \(success ? "Perfect match" : "Mismatch")",
+            details: success ? "Perfect match" : "Mismatch at position \(findFirstDifference() + 1)",
             expectedValue: expectedText,
             actualValue: actualText
         )
@@ -342,26 +222,13 @@ struct KeyboardTestView: View {
     
     private func cancelTest() {
         isTestActive = false
-        actualText = ""
+        // Don't clear actualText to allow user to see what was typed
     }
     
-    private func clearTest() {
+    private func clearAll() {
         expectedText = ""
         actualText = ""
-        selectedTestCase = nil
         isTestActive = false
-        useCustomInput = false
-        customInput = ""
-    }
-    
-    private func resetTest() {
-        actualText = ""
-        isTestActive = false
-    }
-    
-    private func verifyMatch() {
-        let success = actualText == expectedText
-        completeTest(success: success)
     }
     
     private func findFirstDifference() -> Int {
