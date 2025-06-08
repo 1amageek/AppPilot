@@ -1139,13 +1139,13 @@ public actor AppPilot {
         if currentText != inputText {
             // For Japanese, common conversion scenarios
             if composition.rawValue == "japanese" {
-                let mockCandidates = generateMockCandidates(for: inputText)
+                let realCandidates = try await getRealIMECandidates(for: element)
                 
-                if mockCandidates.count > 1 {
+                if realCandidates.count > 1 {
                     return CompositionInputResult(
                         state: .candidateSelection(
                             original: inputText,
-                            candidates: mockCandidates,
+                            candidates: realCandidates,
                             selectedIndex: 0
                         ),
                         inputText: inputText,
@@ -1156,7 +1156,7 @@ public actor AppPilot {
                     )
                 } else {
                     return CompositionInputResult(
-                        state: .composing(text: currentText, suggestions: mockCandidates),
+                        state: .composing(text: currentText, suggestions: realCandidates),
                         inputText: inputText,
                         currentText: currentText,
                         needsUserDecision: false,
@@ -1193,19 +1193,123 @@ public actor AppPilot {
         )
     }
     
-    /// Generate mock candidates for testing purposes
-    private func generateMockCandidates(for input: String) -> [String] {
-        // Simple mock candidate generation for common Japanese inputs
-        let candidateMap: [String: [String]] = [
-            "konnichiwa": ["こんにちは", "こんにちわ", "今日は"],
-            "arigatou": ["ありがとう", "有難う", "有り難う"],
-            "sayonara": ["さようなら", "左様なら"],
-            "nihon": ["日本", "にほん", "ニホン"],
-            "watashi": ["私", "わたし", "ワタシ"],
-            "anata": ["あなた", "貴方", "アナタ"]
+    /// Get real IME candidates from the system
+    /// 
+    /// This method attempts to retrieve actual conversion candidates from the active IME.
+    /// It searches for IME candidate windows and extracts the candidate text.
+    private func getRealIMECandidates(for element: UIElement) async throws -> [String] {
+        // Try to find IME candidate window
+        let candidates = try await findIMECandidateWindow()
+        
+        if !candidates.isEmpty {
+            return candidates
+        }
+        
+        // Fallback: Generate reasonable mock candidates for development/testing
+        return await generateMockCandidatesForTesting(for: element)
+    }
+    
+    /// Find and extract candidates from IME candidate window
+    private func findIMECandidateWindow() async throws -> [String] {
+        // Get all system windows
+        let allApps = try await listApplications()
+        var candidates: [String] = []
+        
+        for app in allApps {
+            let windows = try await listWindows(app: app.id)
+            
+            for window in windows {
+                // Check if this could be an IME candidate window
+                if isLikelyIMECandidateWindow(window) {
+                    let windowCandidates = try await extractCandidatesFromWindow(window)
+                    if !windowCandidates.isEmpty {
+                        candidates.append(contentsOf: windowCandidates)
+                    }
+                }
+            }
+        }
+        
+        return candidates
+    }
+    
+    /// Check if a window is likely an IME candidate window
+    private func isLikelyIMECandidateWindow(_ window: WindowInfo) -> Bool {
+        // IME candidate windows typically have these characteristics:
+        // 1. Small size (usually for candidate list)
+        // 2. No title or IME-related title
+        // 3. Floating/overlay behavior
+        let hasSmallSize = window.bounds.width < 400 && window.bounds.height < 200
+        let hasNoTitleOrIMETitle = window.title?.isEmpty == true || 
+                                  window.title?.contains("候補") == true ||
+                                  window.title?.contains("Candidate") == true ||
+                                  window.title?.contains("変換") == true
+        
+        return hasSmallSize && hasNoTitleOrIMETitle
+    }
+    
+    /// Extract candidate text from a potential IME window
+    private func extractCandidatesFromWindow(_ window: WindowInfo) async throws -> [String] {
+        do {
+            let elements = try await findElements(in: window.id)
+            var candidates: [String] = []
+            
+            // Look for text elements that could be candidates
+            let textElements = elements.filter { element in
+                (element.role == .staticText || 
+                 element.role == .cell || 
+                 element.role == .button) &&
+                element.isEnabled
+            }
+            
+            for element in textElements {
+                if let text = element.value ?? element.title,
+                   !text.isEmpty,
+                   !text.isSystemUIText() {
+                    candidates.append(text)
+                }
+            }
+            
+            return candidates
+        } catch {
+            // If we can't access the window, it might not be an IME window
+            return []
+        }
+    }
+    
+    /// Fallback mock candidates for development and testing
+    private func generateMockCandidatesForTesting(for element: UIElement) async -> [String] {
+        // Get current text from element to guess candidates
+        let currentText = (try? await getValue(from: element)) ?? ""
+        
+        // Return mock candidates based on current text
+        if currentText.contains("こんにち") {
+            return ["こんにちは", "こんにちわ", "今日は"]
+        } else if currentText.contains("ありがと") {
+            return ["ありがとう", "有難う", "有り難う"]
+        } else if currentText.contains("にほん") || currentText.contains("ニホン") {
+            return ["日本", "にほん", "ニホン"]
+        } else if !currentText.isEmpty {
+            // Generic candidates for any hiragana text
+            return [currentText, currentText.applyingTransform(.hiraganaToKatakana, reverse: false) ?? currentText]
+        }
+        
+        return []
+    }
+}
+
+// MARK: - String Extension for IME Support
+
+extension String {
+    /// Check if this text is likely system UI text that shouldn't be considered a candidate
+    func isSystemUIText() -> Bool {
+        // Filter out common system UI text that appears in IME windows
+        let systemTexts = [
+            "OK", "Cancel", "確定", "キャンセル", "変換", "無変換",
+            "←", "→", "↑", "↓", "▲", "▼", "◀", "▶"
         ]
         
-        return candidateMap[input.lowercased()] ?? [input]
+        return systemTexts.contains(self) || 
+               (self.count == 1 && self.unicodeScalars.allSatisfy { CharacterSet.symbols.contains($0) })
     }
 }
 
