@@ -461,7 +461,7 @@ public actor AppPilot {
             }
         }
         
-        guard let app = targetApp, let windowInfo = windowInfo else {
+        guard let app = targetApp, let _ = windowInfo else {
             throw PilotError.windowNotFound(window)
         }
         
@@ -1070,18 +1070,18 @@ public actor AppPilot {
     }
     
     /// Capture screenshot of window
-    public func capture(window: WindowHandle) async throws -> CGImage {
-        print("📷 AppPilot: Capturing window screenshot: \(window.id)")
-        
-        // Get window information to determine bounds
+    public func capture(window: WindowHandle) async throws -> CGImage {        
+        // Get window information and parent application
         let apps = try await listApplications()
         var windowInfo: WindowInfo?
+        var targetApp: AppInfo?
         
         for app in apps {
             do {
                 let windows = try await listWindows(app: app.id)
                 if let found = windows.first(where: { $0.id == window }) {
                     windowInfo = found
+                    targetApp = app
                     break
                 }
             } catch {
@@ -1089,77 +1089,24 @@ public actor AppPilot {
             }
         }
         
-        guard let windowInfo = windowInfo else {
+        guard let windowInfo = windowInfo, let app = targetApp else {
             throw PilotError.windowNotFound(window)
         }
         
-        // Capture screen without fallback
-        let fullScreenImage = try await screenDriver.captureScreen()
-        
-        // Get window bounds for coordinate conversion
-        let windowBounds = windowInfo.bounds
-        
-        print("📊 Screenshot debug info:")
-        print("   Window bounds: \(windowBounds)")
-        print("   Screen image size: \(fullScreenImage.width) x \(fullScreenImage.height)")
-        
-        // Get the main display information for coordinate conversion
-        let mainScreen = NSScreen.main ?? NSScreen.screens.first
-        let screenBounds = mainScreen?.frame ?? CGRect(x: 0, y: 0, width: CGFloat(fullScreenImage.width), height: CGFloat(fullScreenImage.height))
-        
-        print("   Screen bounds: \(screenBounds)")
-        
-        // Convert window bounds to image coordinates
-        // macOS uses bottom-left origin with potentially negative coordinates
-        // CGImage uses top-left origin starting from (0,0)
-        let imageHeight = CGFloat(fullScreenImage.height)
-        let imageWidth = CGFloat(fullScreenImage.width)
-        
-        // Convert from macOS coordinates to screen-relative coordinates
-        let relativeX = windowBounds.minX - screenBounds.minX
-        let relativeY = windowBounds.minY - screenBounds.minY
-        
-        // Convert Y coordinate from bottom-left to top-left origin
-        let convertedY = imageHeight - (relativeY + windowBounds.height)
-        
-        let imageRect = CGRect(
-            x: relativeX,
-            y: convertedY,
-            width: windowBounds.width,
-            height: windowBounds.height
-        )
-        
-        print("   Relative position: (\(relativeX), \(relativeY))")
-        print("   Calculated crop rect: \(imageRect)")
-        
-        // Validate crop rectangle is within image bounds
-        let imageBounds = CGRect(x: 0, y: 0, width: imageWidth, height: imageHeight)
-        
-        // Clamp the rectangle to valid bounds
-        let clampedRect = CGRect(
-            x: max(0, min(imageRect.minX, imageWidth)),
-            y: max(0, min(imageRect.minY, imageHeight)),
-            width: max(0, min(imageRect.width, imageWidth - max(0, imageRect.minX))),
-            height: max(0, min(imageRect.height, imageHeight - max(0, imageRect.minY)))
-        )
-        
-        print("   Image bounds: \(imageBounds)")
-        print("   Clamped crop rect: \(clampedRect)")
-        
-        // Validate crop rectangle has positive dimensions
-        guard clampedRect.width > 0 && clampedRect.height > 0 else {
-            throw PilotError.coordinateOutOfBounds(Point(x: clampedRect.minX, y: clampedRect.minY))
+        // Direct window capture using desktopIndependentWindow
+        // Find the SCWindow ID that matches our WindowInfo
+        guard let windowID = try await screenDriver.findWindowID(
+            title: windowInfo.title,
+            bundleIdentifier: app.bundleIdentifier,
+            bounds: windowInfo.bounds
+        ) else {
+            throw PilotError.windowNotFound(window)
         }
         
-        // Crop the full screen image to window bounds
-        guard let croppedImage = fullScreenImage.cropping(to: clampedRect) else {
-            print("❌ Failed to crop image with clamped rect: \(clampedRect)")
-            throw PilotError.osFailure(api: "CGImage.cropping", code: -1)
-        }
-        
-        print("✅ Successfully cropped image: \(croppedImage.width) x \(croppedImage.height)")
-        return croppedImage
+        let windowImage = try await screenDriver.captureWindow(windowID: windowID)
+        return windowImage
     }
+    
     
     // MARK: - Tree and Debug Methods
     

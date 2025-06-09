@@ -32,10 +32,8 @@ struct CompositionInputIntegrationTests {
         // Stage 2: 理解する (Understand) - Test Composition Flow
         print("\n🧠 Stage 2: 理解する (Test Composition Workflow)")
         
-        // Clear any existing content
-        try await pilot.click(element: textField)
-        try await pilot.keyCombination([.a], modifiers: [.command])
-        try await pilot.keyCombination([.delete], modifiers: [])
+        // Clear any existing content using setValue
+        try await pilot.setValue("", for: textField)
         
         // Stage 3: アクション (Action) - Execute Composition Input
         print("\n🎬 Stage 3: アクション (Execute Composition Input)")
@@ -111,10 +109,8 @@ struct CompositionInputIntegrationTests {
         for (index, testCase) in testCases.enumerated() {
             print("\n📝 Test Case \(index + 1): \(testCase.2)")
             
-            // Clear field
-            try await pilot.click(element: textField)
-            try await pilot.keyCombination([.a], modifiers: [.command])
-            try await pilot.keyCombination([.delete], modifiers: [])
+            // Clear field using setValue
+            try await pilot.setValue("", for: textField)
             
             // Test composition
             let result = try await pilot.input(testCase.0, into: textField, with: testCase.1)
@@ -159,10 +155,8 @@ struct CompositionInputIntegrationTests {
             throw TestSessionError.noTargetsFound
         }
         
-        // Clear field
-        try await pilot.click(element: textField)
-        try await pilot.keyCombination([.a], modifiers: [.command])
-        try await pilot.keyCombination([.delete], modifiers: [])
+        // Clear field using setValue
+        try await pilot.setValue("", for: textField)
         
         // Start composition
         print("📝 Starting composition...")
@@ -208,10 +202,8 @@ struct CompositionInputIntegrationTests {
         for (composition, text, description) in inputSources {
             print("\n📝 Testing: \(description)")
             
-            // Clear field
-            try await pilot.click(element: textField)
-            try await pilot.keyCombination([.a], modifiers: [.command])
-            try await pilot.keyCombination([.delete], modifiers: [])
+            // Clear field using setValue
+            try await pilot.setValue("", for: textField)
             
             // Test composition with specific input method
             let result = try await pilot.input(text, into: textField, with: composition)

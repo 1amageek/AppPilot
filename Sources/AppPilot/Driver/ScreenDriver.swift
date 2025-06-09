@@ -1,3 +1,12 @@
+//
+//  ScreenDriver.swift
+//  AppPilot
+//
+//  Created by Norikazu Muramoto on 2025-06-09.
+//  Revised to fix a CGS_REQUIRE_INIT assertion when using
+//  SCContentFilter(desktopIndependentWindow:) from a non-GUI context.
+//
+
 import Foundation
 import CoreGraphics
 import AppKit
@@ -6,227 +15,199 @@ import UniformTypeIdentifiers
 @preconcurrency import ScreenCaptureKit
 
 // MARK: - Screen Driver Protocol
-
 public protocol ScreenDriver: Sendable {
-    /// Capture the entire screen
-    func captureScreen() async throws -> CGImage
-    
-    /// Capture all windows of a specific application
-    func captureApplication(bundleId: String) async throws -> CGImage
-    
-    /// Capture a region of the screen
-    func captureRegion(_ region: CGRect) async throws -> CGImage
-    
-    /// Check screen recording permission
-    func checkScreenRecordingPermission() async -> Bool
-    
-    /// Request screen recording permission (opens System Settings)
-    func requestScreenRecordingPermission() async throws
+    func captureScreen()                          async throws -> CGImage
+    func captureApplication(bundleId: String)     async throws -> CGImage
+    func captureWindow(windowID: UInt32)          async throws -> CGImage
+    func findWindowID(title: String?,
+                      bundleIdentifier: String?,
+                      bounds: CGRect)            async throws -> UInt32?
+    func captureRegion(_ region: CGRect)          async throws -> CGImage
+    func checkScreenRecordingPermission()         async -> Bool
+    func requestScreenRecordingPermission()       async throws
+    func getShareableContent()                    async throws -> SCShareableContent
 }
 
-// MARK: - Screen Capture Utility Functions
-
+// MARK: - Utility
 public enum ScreenCaptureUtility {
-    /// Convert CGImage to PNG data
+    public enum ImageFormat { case png, jpeg }
+    
     public static func convertToPNG(_ image: CGImage) -> Data? {
-        let mutableData = NSMutableData()
-        guard let destination = CGImageDestinationCreateWithData(
-            mutableData,
-            UTType.png.identifier as CFString,
-            1,
-            nil
-        ) else {
-            return nil
-        }
-        
-        CGImageDestinationAddImage(destination, image, nil)
-        guard CGImageDestinationFinalize(destination) else {
-            return nil
-        }
-        
-        return mutableData as Data
+        convert(image, as: .png)
     }
     
-    /// Convert CGImage to JPEG data with quality setting
-    public static func convertToJPEG(_ image: CGImage, quality: CGFloat = 0.8) -> Data? {
-        let mutableData = NSMutableData()
-        guard let destination = CGImageDestinationCreateWithData(
-            mutableData,
-            UTType.jpeg.identifier as CFString,
-            1,
-            nil
-        ) else {
-            return nil
-        }
-        
-        let properties: [CFString: Any] = [
-            kCGImageDestinationLossyCompressionQuality: quality
-        ]
-        
-        CGImageDestinationAddImage(destination, image, properties as CFDictionary)
-        guard CGImageDestinationFinalize(destination) else {
-            return nil
-        }
-        
-        return mutableData as Data
+    public static func convertToJPEG(_ image: CGImage,
+                                     quality: CGFloat = 0.8) -> Data? {
+        convert(image, as: .jpeg,
+                options: [kCGImageDestinationLossyCompressionQuality: quality])
     }
     
-    /// Save CGImage to file
-    public static func saveToFile(_ image: CGImage, path: String, format: ImageFormat = .png) -> Bool {
-        let url = URL(fileURLWithPath: path)
-        
-        let utType: UTType
-        switch format {
-        case .png:
-            utType = UTType.png
-        case .jpeg:
-            utType = UTType.jpeg
-        }
-        
-        guard let destination = CGImageDestinationCreateWithURL(
-            url as CFURL,
-            utType.identifier as CFString,
-            1,
-            nil
-        ) else {
-            return false
-        }
-        
-        CGImageDestinationAddImage(destination, image, nil)
-        return CGImageDestinationFinalize(destination)
+    public static func saveToFile(_ image: CGImage,
+                                  path: String,
+                                  format: ImageFormat = .png) -> Bool {
+        let url     = URL(fileURLWithPath: path)
+        let utType  = format == .png ? UTType.png : UTType.jpeg
+        guard
+            let dest = CGImageDestinationCreateWithURL(url as CFURL,
+                                                       utType.identifier as CFString,
+                                                       1, nil)
+        else { return false }
+        CGImageDestinationAddImage(dest, image, nil)
+        return CGImageDestinationFinalize(dest)
     }
     
-    public enum ImageFormat {
-        case png, jpeg
+    // MARK: - Private
+    private static func convert(_ image: CGImage,
+                                as format: ImageFormat,
+                                options: [CFString: Any]? = nil) -> Data? {
+        let md = NSMutableData()
+        let utType = format == .png ? UTType.png : UTType.jpeg
+        guard
+            let dest = CGImageDestinationCreateWithData(
+                md, utType.identifier as CFString, 1, nil)
+        else { return nil }
+        CGImageDestinationAddImage(dest, image, options as CFDictionary?)
+        guard CGImageDestinationFinalize(dest) else { return nil }
+        return md as Data
     }
 }
 
-// MARK: - Simple Screen Driver Implementation
-
+// MARK: - Default Implementation
 public actor DefaultScreenDriver: ScreenDriver {
     
-    public init() {}
+    // MARK: CGS bootstrap (fixes CGS_REQUIRE_INIT)
+    private static var didBootstrapCGS = false
+    private static func bootstrapCGSIfNeeded() {
+        guard !didBootstrapCGS else { return }
+        _ = CGMainDisplayID()              // triggers CGS initialisation
+        didBootstrapCGS = true
+    }
     
-    // MARK: - Public Interface
+    // MARK: Lifecycle
+    public init() {
+        Self.bootstrapCGSIfNeeded()
+    }
     
+    // MARK: Public API
     public func captureScreen() async throws -> CGImage {
-        guard await checkScreenRecordingPermission() else {
-            throw ScreenCaptureError.permissionDenied
-        }
-        
-        let content = try await getShareableContent()
-        
-        guard let mainDisplay = content.displays.first else {
+        try await ensurePermission()
+        let content     = try await getShareableContentInternal()
+        guard let display = content.displays.first else {
             throw ScreenCaptureError.noDisplayFound
         }
         
-        let filter = SCContentFilter(display: mainDisplay, excludingWindows: [])
+        let filter      = SCContentFilter(display: display,
+                                          excludingWindows: [])
+        let config      = SCStreamConfiguration()
+        config.width    = Int(display.frame.width)
+        config.height   = Int(display.frame.height)
+        config.pixelFormat       = kCVPixelFormatType_32BGRA
+        config.showsCursor       = false
+        config.capturesAudio     = false
         
-        let config = SCStreamConfiguration()
-        config.width = Int(mainDisplay.frame.width)
-        config.height = Int(mainDisplay.frame.height)
-        config.pixelFormat = kCVPixelFormatType_32BGRA
-        config.showsCursor = false
-        config.capturesAudio = false
-        
-        return try await captureWithConfiguration(filter: filter, configuration: config)
+        return try await capture(filter: filter, config: config)
     }
     
     public func captureApplication(bundleId: String) async throws -> CGImage {
-        guard await checkScreenRecordingPermission() else {
-            throw ScreenCaptureError.permissionDenied
-        }
+        try await ensurePermission()
+        let content = try await getShareableContentInternal()
         
-        let content = try await getShareableContent()
+        guard let app = content.applications
+            .first(where: { $0.bundleIdentifier == bundleId })
+        else { throw ScreenCaptureError.applicationNotFound(bundleId) }
         
-        guard let app = content.applications.first(where: { $0.bundleIdentifier == bundleId }) else {
-            throw ScreenCaptureError.applicationNotFound(bundleId)
-        }
-        
-        let windows = content.windows.filter { window in
-            window.owningApplication?.bundleIdentifier == bundleId && window.isOnScreen
-        }
-        
-        guard !windows.isEmpty else {
+        let appWindows = content.windows
+            .filter { $0.owningApplication?.bundleIdentifier == bundleId && $0.isOnScreen }
+        guard !appWindows.isEmpty else {
             throw ScreenCaptureError.noWindowsFound(bundleId)
         }
         
-        // Find the main display for the application
-        guard let mainDisplay = content.displays.first else {
+        guard let display = content.displays.first else {
             throw ScreenCaptureError.noDisplayFound
         }
         
-        // Create content filter for the application
-        let filter = SCContentFilter(
-            display: mainDisplay,
-            including: [app],
-            exceptingWindows: []
-        )
+        let filter   = SCContentFilter(display: display,
+                                       including: [app],
+                                       exceptingWindows: [])
         
-        let config = SCStreamConfiguration()
+        let (w, h)   = appWindows
+            .max { $0.frame.area < $1.frame.area }
+            .map { (Int($0.frame.width), Int($0.frame.height)) } ?? (1920, 1080)
         
-        // Calculate optimal size from application windows
-        let maxWindow = windows.max { w1, w2 in
-            w1.frame.width * w1.frame.height < w2.frame.width * w2.frame.height
+        let config   = SCStreamConfiguration()
+        config.width            = max(w, 800)
+        config.height           = max(h, 600)
+        config.pixelFormat      = kCVPixelFormatType_32BGRA
+        config.showsCursor      = false
+        config.capturesAudio    = false
+        
+        return try await capture(filter: filter, config: config)
+    }
+    
+    public func captureWindow(windowID: UInt32) async throws -> CGImage {
+        try await ensurePermission()
+        let content = try await getShareableContentInternal()
+        
+        guard let targetWindow = content.windows
+            .first(where: { $0.windowID == windowID })
+        else { throw ScreenCaptureError.noWindowsFound("windowID: \(windowID)") }
+        
+        // Build SCContentFilter on the main actor to avoid CGS_REQUIRE_INIT
+        let filter = try await MainActor.run {
+            SCContentFilter(desktopIndependentWindow: targetWindow)
         }
         
-        if let maxWindow = maxWindow {
-            config.width = max(Int(maxWindow.frame.width), 800)
-            config.height = max(Int(maxWindow.frame.height), 600)
-        } else {
-            config.width = 1920
-            config.height = 1080
-        }
+        let config  = SCStreamConfiguration()
+        config.width            = max(Int(targetWindow.frame.width), 100)
+        config.height           = max(Int(targetWindow.frame.height), 100)
+        config.pixelFormat      = kCVPixelFormatType_32BGRA
+        config.showsCursor      = false
+        config.capturesAudio    = false
         
-        config.pixelFormat = kCVPixelFormatType_32BGRA
-        config.showsCursor = false
-        config.capturesAudio = false
-        
-        return try await captureWithConfiguration(filter: filter, configuration: config)
+        return try await capture(filter: filter, config: config)
+    }
+    
+    public func findWindowID(title: String?,
+                             bundleIdentifier: String?,
+                             bounds: CGRect) async throws -> UInt32? {
+        let content = try await getShareableContentInternal()
+        return content.windows
+            .first(where: { w in
+                (title == nil  || w.title == title) &&
+                (bundleIdentifier == nil ||
+                 w.owningApplication?.bundleIdentifier == bundleIdentifier) &&
+                w.frame.isAlmostEqual(to: bounds, tolerance: 10)
+            })?.windowID
     }
     
     public func captureRegion(_ region: CGRect) async throws -> CGImage {
-        guard await checkScreenRecordingPermission() else {
-            throw ScreenCaptureError.permissionDenied
-        }
-        
-        let content = try await getShareableContent()
-        
-        guard let mainDisplay = content.displays.first else {
+        try await ensurePermission()
+        let content          = try await getShareableContentInternal()
+        guard let display    = content.displays.first else {
             throw ScreenCaptureError.noDisplayFound
         }
         
-        // Validate region bounds
-        let displayBounds = mainDisplay.frame
-        let clampedRegion = CGRect(
-            x: max(0, min(region.origin.x, displayBounds.width)),
-            y: max(0, min(region.origin.y, displayBounds.height)),
-            width: max(1, min(region.width, displayBounds.width - region.origin.x)),
-            height: max(1, min(region.height, displayBounds.height - region.origin.y))
-        )
+        let displayBounds    = display.frame
+        let r                = region.clamped(to: displayBounds)
         
-        let filter = SCContentFilter(display: mainDisplay, excludingWindows: [])
-        
-        let config = SCStreamConfiguration()
-        config.width = Int(clampedRegion.width)
-        config.height = Int(clampedRegion.height)
-        config.sourceRect = clampedRegion
-        config.pixelFormat = kCVPixelFormatType_32BGRA
-        config.showsCursor = false
+        let filter           = SCContentFilter(display: display,
+                                               excludingWindows: [])
+        let config           = SCStreamConfiguration()
+        config.width         = Int(r.width)
+        config.height        = Int(r.height)
+        config.sourceRect    = r
+        config.pixelFormat   = kCVPixelFormatType_32BGRA
+        config.showsCursor   = false
         config.capturesAudio = false
         
-        return try await captureWithConfiguration(filter: filter, configuration: config)
+        return try await capture(filter: filter, config: config)
     }
     
     public func checkScreenRecordingPermission() async -> Bool {
-        // Check if ScreenCaptureKit is available (macOS 12.3+)
-        guard #available(macOS 12.3, *) else {
-            return false
-        }
-        
-        // Try to get shareable content - this will fail if permission is denied
+        guard #available(macOS 12.3, *) else { return false }
         do {
-            _ = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
+            _ = try await SCShareableContent
+                .excludingDesktopWindows(false, onScreenWindowsOnly: false)
             return true
         } catch {
             return false
@@ -234,48 +215,48 @@ public actor DefaultScreenDriver: ScreenDriver {
     }
     
     public func requestScreenRecordingPermission() async throws {
-        // Open System Settings to Screen Recording section
-        let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!
+        let url = URL(
+            string:"x-apple.systempreferences:"
+            + "com.apple.preference.security?Privacy_ScreenCapture")!
         NSWorkspace.shared.open(url)
-        
         throw ScreenCaptureError.permissionDenied
     }
     
-    // MARK: - Private Implementation Methods
+    public func getShareableContent() async throws -> SCShareableContent {
+        try await getShareableContentInternal()
+    }
     
-    private func captureWithConfiguration(
-        filter: SCContentFilter,
-        configuration: SCStreamConfiguration
-    ) async throws -> CGImage {
+    // MARK: - Private Helpers
+    private func ensurePermission() async throws {
+        guard await checkScreenRecordingPermission() else {
+            throw ScreenCaptureError.permissionDenied
+        }
+    }
+    
+    @MainActor
+    private func capture(filter: SCContentFilter,
+                         config: SCStreamConfiguration) async throws -> CGImage {
         do {
-            return try await SCScreenshotManager.captureImage(
-                contentFilter: filter,
-                configuration: configuration
-            )
+            return try await SCScreenshotManager
+                .captureImage(contentFilter: filter, configuration: config)
+        } catch let error as SCStreamError where error.code == .userDeclined {
+            throw ScreenCaptureError.permissionDenied
         } catch {
-            if let scError = error as? SCStreamError {
-                switch scError.code {
-                case .userDeclined:
-                    throw ScreenCaptureError.permissionDenied
-                default:
-                    throw ScreenCaptureError.captureFailed
-                }
-            }
             throw ScreenCaptureError.captureFailed
         }
     }
     
-    private func getShareableContent() async throws -> SCShareableContent {
+    private func getShareableContentInternal() async throws -> SCShareableContent {
         do {
-            return try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+            return try await SCShareableContent
+                .excludingDesktopWindows(false, onScreenWindowsOnly: true)
         } catch {
             throw ScreenCaptureError.screenCaptureKitUnavailable
         }
     }
 }
 
-// MARK: - Error Types
-
+// MARK: - Error Definitions
 public enum ScreenCaptureError: Error, LocalizedError, Sendable {
     case applicationNotFound(String)
     case noWindowsFound(String)
@@ -286,18 +267,40 @@ public enum ScreenCaptureError: Error, LocalizedError, Sendable {
     
     public var errorDescription: String? {
         switch self {
-        case .applicationNotFound(let bundleId):
-            return "Application with bundle ID '\(bundleId)' not found or not running"
-        case .noWindowsFound(let identifier):
-            return "No visible windows found for '\(identifier)'"
+        case .applicationNotFound(let id):
+            return "Application with bundle ID “\(id)” not found or not running."
+        case .noWindowsFound(let id):
+            return "No visible windows found for “\(id)”."
         case .noDisplayFound:
-            return "No display found for capture"
+            return "No display found for capture."
         case .captureFailed:
-            return "Failed to capture screen"
+            return "Failed to capture screen."
         case .permissionDenied:
-            return "Screen recording permission denied. Please grant access in System Settings > Privacy & Security > Screen Recording"
+            return "Screen recording permission denied. " +
+            "Grant access in System Settings › Privacy & Security › Screen Recording."
         case .screenCaptureKitUnavailable:
-            return "ScreenCaptureKit is not available or failed to initialize"
+            return "ScreenCaptureKit is not available or failed to initialise."
         }
+    }
+}
+
+// MARK: - CGRect helpers (private)
+fileprivate extension CGRect {
+    var area: CGFloat { width * height }
+    
+    func clamped(to bounds: CGRect) -> CGRect {
+        CGRect(
+            x: max(bounds.minX, min(maxX, bounds.maxX - width)),
+            y: max(bounds.minY, min(maxY, bounds.maxY - height)),
+            width: min(width, bounds.width),
+            height: min(height, bounds.height)
+        )
+    }
+    
+    func isAlmostEqual(to other: CGRect, tolerance: CGFloat) -> Bool {
+        abs(minX - other.minX) < tolerance &&
+        abs(minY - other.minY) < tolerance &&
+        abs(width - other.width) < tolerance &&
+        abs(height - other.height) < tolerance
     }
 }

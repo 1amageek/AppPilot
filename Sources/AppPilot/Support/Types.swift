@@ -653,6 +653,8 @@ public struct WindowInfo: Sendable, Codable {
     public let isMain: Bool
     /// Name of the application that owns this window
     public let appName: String
+    /// ScreenCaptureKit window ID for direct window capture
+    public let windowID: UInt32?
     
     /// Creates window information
     /// 
@@ -663,13 +665,15 @@ public struct WindowInfo: Sendable, Codable {
     ///   - isVisible: Whether the window is visible
     ///   - isMain: Whether this is the main window
     ///   - appName: Name of the owning application
-    public init(id: WindowHandle, title: String?, bounds: CGRect, isVisible: Bool, isMain: Bool, appName: String) {
+    ///   - windowID: ScreenCaptureKit window ID for direct capture
+    public init(id: WindowHandle, title: String?, bounds: CGRect, isVisible: Bool, isMain: Bool, appName: String, windowID: UInt32? = nil) {
         self.id = id
         self.title = title
         self.bounds = bounds
         self.isVisible = isVisible
         self.isMain = isMain
         self.appName = appName
+        self.windowID = windowID
     }
 }
 

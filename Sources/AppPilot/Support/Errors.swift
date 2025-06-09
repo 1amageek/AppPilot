@@ -15,6 +15,7 @@ public enum PilotError: Error, Sendable {
     case streamOverflow
     case userInterrupted
     case invalidArgument(String)
+    case screenCaptureError(String)
 }
 
 extension PilotError: LocalizedError {
@@ -56,6 +57,8 @@ extension PilotError: LocalizedError {
             return "Operation interrupted by user activity"
         case .invalidArgument(let message):
             return "Invalid argument: \(message)"
+        case .screenCaptureError(let message):
+            return "Screen capture error: \(message)"
         }
     }
 }

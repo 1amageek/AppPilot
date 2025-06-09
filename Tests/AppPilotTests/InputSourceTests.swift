@@ -381,10 +381,8 @@ struct InputSourceTests {
             // Clear existing content
             if element.role == .textField {
                 print("Clearing field...")
-                try await pilot.keyCombination([.a], modifiers: [.command])
-                try await Task.sleep(nanoseconds: 800_000_000) // 800ms standard wait
-                try await pilot.keyCombination([.delete], modifiers: [])
-                try await Task.sleep(nanoseconds: 800_000_000) // 800ms standard wait
+                try await pilot.setValue("", for: element)
+                try await Task.sleep(nanoseconds: 500_000_000) // 500ms
             }
             
             // Test input source switching
