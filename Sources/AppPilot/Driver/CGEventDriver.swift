@@ -132,11 +132,14 @@ public extension CGEventDriver {
     // MARK: Input Source Management
     func getCurrentInputSource() async throws -> InputSourceInfo {
         let currentSource = TISCopyCurrentKeyboardInputSource().takeRetainedValue()
-        let identifier = TISGetInputSourceProperty(currentSource, kTISPropertyInputSourceID)
-        let name = TISGetInputSourceProperty(currentSource, kTISPropertyLocalizedName)
         
-        let identifierString = Unmanaged<CFString>.fromOpaque(identifier!).takeUnretainedValue() as String
-        let nameString = Unmanaged<CFString>.fromOpaque(name!).takeUnretainedValue() as String
+        guard let identifier = TISGetInputSourceProperty(currentSource, kTISPropertyInputSourceID),
+              let name = TISGetInputSourceProperty(currentSource, kTISPropertyLocalizedName) else {
+            throw PilotError.osFailure(api: "TISGetInputSourceProperty", code: -1)
+        }
+        
+        let identifierString = Unmanaged<CFString>.fromOpaque(identifier).takeUnretainedValue() as String
+        let nameString = Unmanaged<CFString>.fromOpaque(name).takeUnretainedValue() as String
         
         return InputSourceInfo(
             identifier: identifierString,
@@ -147,7 +150,7 @@ public extension CGEventDriver {
     
     func getAvailableInputSources() async throws -> [InputSourceInfo] {
         guard let sources = TISCreateInputSourceList(nil, false)?.takeRetainedValue() else {
-            return []
+            throw PilotError.osFailure(api: "TISCreateInputSourceList", code: -1)
         }
         
         let sourceCount = CFArrayGetCount(sources)
@@ -186,7 +189,7 @@ public extension CGEventDriver {
         
         let sources = try await getAvailableInputSources()
         guard sources.contains(where: { $0.identifier == source.rawValue }) else {
-            return
+            throw PilotError.osFailure(api: "switchInputSource", code: -1)
         }
         
         // Find the TISInputSource object

@@ -83,6 +83,76 @@ let leftPanelElements = allElements.filter { element in
 - Real automation should adapt to UI changes
 - Element-based automation is more reliable and readable
 
+### 🚫 ABSOLUTE PROHIBITION: NO INAPPROPRIATE FALLBACKS
+
+**Fallbacks that mask actual failures are strictly forbidden. Never implement:**
+
+- ❌ **Placeholder generation when real functionality fails**: Creating fake images, mock data, or dummy objects when actual operations fail
+- ❌ **Silent failure masking**: Returning default values (like `CGRect.zero`, `Point(x: 400, y: 400)`) when real values cannot be obtained
+- ❌ **Automatic degradation without error reporting**: Switching to degraded functionality without properly indicating the failure
+- ❌ **Error swallowing**: Catching exceptions and returning fallback values instead of propagating the error
+
+**✅ Correct approaches:**
+
+- ✅ **Proper error propagation**: Throw appropriate `PilotError` cases when operations fail
+- ✅ **Explicit failure indication**: Return `nil` or throw exceptions when functionality is unavailable
+- ✅ **Fail-fast behavior**: Stop execution immediately when required conditions are not met
+- ✅ **Meaningful error messages**: Provide specific error information to help diagnose problems
+
+**Examples:**
+
+```swift
+// ❌ WRONG: Masking screen capture failure with placeholder
+do {
+    return try await screenDriver.captureScreen()
+} catch {
+    // Create placeholder image...
+    return placeholderImage
+}
+
+// ✅ CORRECT: Proper error propagation
+return try await screenDriver.captureScreen()
+
+// ❌ WRONG: Using default coordinates when window bounds unavailable
+let scrollPoint = windowInfo?.bounds.center ?? Point(x: 400, y: 400)
+
+// ✅ CORRECT: Failing when required information is unavailable
+guard let windowInfo = windowInfo else {
+    throw PilotError.windowNotFound(window)
+}
+let scrollPoint = Point(x: windowInfo.bounds.midX, y: windowInfo.bounds.midY)
+
+// ❌ WRONG: Returning cached value when live value fails
+guard let axElement = elementRefs[element.id] else {
+    return element.value  // Stale cached value
+}
+
+// ✅ CORRECT: Throwing error when element is no longer accessible
+guard let axElement = elementRefs[element.id] else {
+    throw PilotError.elementNotAccessible(element.id)
+}
+```
+
+**Rationale:**
+- Inappropriate fallbacks hide bugs and make debugging extremely difficult
+- Silent failures violate the principle of least surprise
+- Fake data can lead to false positives in testing
+- Proper error handling enables users to make informed decisions about failure recovery
+- Real failures should be exposed so they can be properly addressed
+
+**Appropriate vs. Inappropriate Fallbacks:**
+
+✅ **Appropriate fallbacks** (functional alternatives):
+- Element-based automation → coordinate-based automation (when element detection fails)
+- Primary network endpoint → backup endpoint (when primary is down)
+- Preferred file format → alternative format (when preferred is not supported)
+
+❌ **Inappropriate fallbacks** (failure masking):
+- Real screen capture → placeholder image generation
+- Live element bounds → cached/zero bounds
+- Actual input source switching → silent no-op
+- Real IME candidates → mock candidates
+
 ## Project Architecture
 
 This is a Swift Package Manager (SPM) library project named "AppPilot" targeting macOS 15+. The project uses Swift 6.1 and follows the standard SPM structure:

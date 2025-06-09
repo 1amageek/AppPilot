@@ -461,8 +461,8 @@ public actor AppPilot {
             }
         }
         
-        guard let app = targetApp, let _ = windowInfo?.bounds else {
-            return
+        guard let app = targetApp, let windowInfo = windowInfo else {
+            throw PilotError.windowNotFound(window)
         }
         
         // Find the NSRunningApplication for activation
@@ -508,7 +508,7 @@ public actor AppPilot {
                     )
                     
                     if !expandedBounds.contains(CGPoint(x: point.x, y: point.y)) {
-                        // Point is outside window bounds, but proceed anyway for testing purposes
+                        throw PilotError.coordinateOutOfBounds(point)
                     }
                     return
                 }
@@ -1007,11 +1007,10 @@ public actor AppPilot {
                 }
             }
             
-            if let windowInfo = windowInfo {
-                scrollPoint = Point(x: windowInfo.bounds.midX, y: windowInfo.bounds.midY)
-            } else {
-                scrollPoint = Point(x: 400.0, y: 400.0) // Default center
+            guard let windowInfo = windowInfo else {
+                throw PilotError.windowNotFound(window)
             }
+            scrollPoint = Point(x: windowInfo.bounds.midX, y: windowInfo.bounds.midY)
         }
         
         try await validateCoordinates(scrollPoint, for: window)
@@ -1094,47 +1093,8 @@ public actor AppPilot {
             throw PilotError.windowNotFound(window)
         }
         
-        // Try ScreenCaptureKit or fallback to placeholder
-        let fullScreenImage: CGImage
-        
-        do {
-            fullScreenImage = try await screenDriver.captureScreen()
-            print("✅ Using ScreenCaptureKit for screenshot")
-        } catch {
-            print("⚠️ ScreenCaptureKit failed: \(error)")
-            print("🔄 Creating placeholder image for screenshot test...")
-            
-            // Create a placeholder image representing the window
-            let placeholderSize = CGSize(width: max(400, windowInfo.bounds.width), height: max(300, windowInfo.bounds.height))
-            let colorSpace = CGColorSpaceCreateDeviceRGB()
-            let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue
-            
-            guard let context = CGContext(
-                data: nil,
-                width: Int(placeholderSize.width),
-                height: Int(placeholderSize.height),
-                bitsPerComponent: 8,
-                bytesPerRow: 0,
-                space: colorSpace,
-                bitmapInfo: bitmapInfo
-            ) else {
-                throw PilotError.osFailure(api: "CGContext creation", code: -1)
-            }
-            
-            // Fill with light gray background
-            context.setFillColor(CGColor(red: 0.9, green: 0.9, blue: 0.9, alpha: 1.0))
-            context.fill(CGRect(origin: .zero, size: placeholderSize))
-            
-            // Add some text to indicate this is a placeholder
-            context.setFillColor(CGColor(red: 0.3, green: 0.3, blue: 0.3, alpha: 1.0))
-            
-            guard let placeholderImage = context.makeImage() else {
-                throw PilotError.osFailure(api: "CGContext.makeImage", code: -1)
-            }
-            
-            print("✅ Using placeholder image for screenshot (\(Int(placeholderSize.width))x\(Int(placeholderSize.height)))")
-            return placeholderImage
-        }
+        // Capture screen without fallback
+        let fullScreenImage = try await screenDriver.captureScreen()
         
         // Get window bounds for coordinate conversion
         let windowBounds = windowInfo.bounds
@@ -1186,16 +1146,9 @@ public actor AppPilot {
         print("   Image bounds: \(imageBounds)")
         print("   Clamped crop rect: \(clampedRect)")
         
-        // Check if the clamped rectangle has positive dimensions
+        // Validate crop rectangle has positive dimensions
         guard clampedRect.width > 0 && clampedRect.height > 0 else {
-            print("❌ Invalid crop rectangle - no valid area to crop")
-            // Return a small section of the full screen as fallback
-            let fallbackRect = CGRect(x: 0, y: 0, width: min(200, imageWidth), height: min(200, imageHeight))
-            guard let fallbackImage = fullScreenImage.cropping(to: fallbackRect) else {
-                throw PilotError.osFailure(api: "CGImage.cropping (fallback)", code: -1)
-            }
-            print("✅ Using fallback crop: \(fallbackRect)")
-            return fallbackImage
+            throw PilotError.coordinateOutOfBounds(Point(x: clampedRect.minX, y: clampedRect.minY))
         }
         
         // Crop the full screen image to window bounds
@@ -1206,6 +1159,60 @@ public actor AppPilot {
         
         print("✅ Successfully cropped image: \(croppedImage.width) x \(croppedImage.height)")
         return croppedImage
+    }
+    
+    // MARK: - Tree and Debug Methods
+    
+    /// Dump UI element tree structure for debugging
+    /// 
+    /// Returns a hierarchical representation of all UI elements in a window.
+    /// This is useful for debugging automation scripts and understanding the UI structure.
+    /// 
+    /// - Parameters:
+    ///   - window: The window to analyze
+    ///   - maxDepth: Maximum tree depth to traverse (default: 5)
+    /// - Returns: A string representation of the UI tree structure
+    /// - Throws: `PilotError.windowNotFound` if the window is invalid
+    public func dumpUITree(
+        for window: WindowHandle,
+        maxDepth: Int = 5
+    ) async throws -> String {
+        return try await accessibilityDriver.dumpUITree(for: window, maxDepth: maxDepth)
+    }
+    
+    /// Get structured UI tree data for programmatic analysis
+    /// 
+    /// Returns the UI element hierarchy as structured data that can be analyzed
+    /// programmatically by AI or automation scripts.
+    /// 
+    /// - Parameters:
+    ///   - window: The window to analyze
+    ///   - maxDepth: Maximum tree depth to traverse (default: 5)
+    /// - Returns: A hierarchical tree structure of UI elements
+    /// - Throws: `PilotError.windowNotFound` if the window is invalid
+    public func getUITree(
+        for window: WindowHandle,
+        maxDepth: Int = 5
+    ) async throws -> UIElementTree {
+        return try await accessibilityDriver.getUITree(for: window, maxDepth: maxDepth)
+    }
+    
+    /// Get a compact summary of UI elements for AI analysis
+    /// 
+    /// Returns a condensed view of the UI tree showing only interactive elements.
+    /// This is optimized for AI consumption with reduced noise.
+    /// 
+    /// - Parameters:
+    ///   - window: The window to analyze
+    ///   - maxDepth: Maximum tree depth to traverse (default: 3)
+    /// - Returns: A compact string summary of interactive elements
+    /// - Throws: `PilotError.windowNotFound` if the window is invalid
+    public func getUISummary(
+        for window: WindowHandle,
+        maxDepth: Int = 3
+    ) async throws -> String {
+        let tree = try await getUITree(for: window, maxDepth: maxDepth)
+        return tree.toSummary()
     }
     
     // MARK: - Convenience Methods
@@ -1381,8 +1388,8 @@ public actor AppPilot {
             return candidates
         }
         
-        // Fallback: Generate reasonable mock candidates for development/testing
-        return await generateMockCandidatesForTesting(for: element)
+        // Return empty array when no real candidates are available
+        return []
     }
     
     /// Find and extract candidates from IME candidate window
@@ -1452,25 +1459,6 @@ public actor AppPilot {
         }
     }
     
-    /// Fallback mock candidates for development and testing
-    private func generateMockCandidatesForTesting(for element: UIElement) async -> [String] {
-        // Get current text from element to guess candidates
-        let currentText = (try? await getValue(from: element)) ?? ""
-        
-        // Return mock candidates based on current text
-        if currentText.contains("こんにち") {
-            return ["こんにちは", "こんにちわ", "今日は"]
-        } else if currentText.contains("ありがと") {
-            return ["ありがとう", "有難う", "有り難う"]
-        } else if currentText.contains("にほん") || currentText.contains("ニホン") {
-            return ["日本", "にほん", "ニホン"]
-        } else if !currentText.isEmpty {
-            // Generic candidates for any hiragana text
-            return [currentText, currentText.applyingTransform(.hiraganaToKatakana, reverse: false) ?? currentText]
-        }
-        
-        return []
-    }
 }
 
 // MARK: - String Extension for IME Support

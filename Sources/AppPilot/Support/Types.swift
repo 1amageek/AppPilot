@@ -311,6 +311,164 @@ public enum WaitSpec: Sendable {
     case uiChange(window: WindowHandle, timeout: TimeInterval)
 }
 
+// MARK: - UI Tree Structure
+
+/// Hierarchical representation of UI elements
+/// 
+/// `UIElementTree` represents the accessibility tree structure of a window,
+/// allowing for programmatic analysis of UI hierarchy and relationships.
+public struct UIElementTree: Sendable, Codable {
+    /// The UI element at this node
+    public let element: UIElement
+    /// Child elements in the tree
+    public let children: [UIElementTree]
+    /// Depth level in the tree (0 = root)
+    public let depth: Int
+    
+    public init(element: UIElement, children: [UIElementTree] = [], depth: Int = 0) {
+        self.element = element
+        self.children = children
+        self.depth = depth
+    }
+    
+    /// Convert tree to readable string format
+    /// 
+    /// Returns a formatted string representation of the UI tree with indentation
+    /// showing the hierarchy and all element properties.
+    /// 
+    /// ```swift
+    /// let tree = try await pilot.getUITree(for: window)
+    /// print(tree.toString())
+    /// ```
+    public func toString() -> String {
+        var result = ""
+        appendToString(&result, indentLevel: 0)
+        return result
+    }
+    
+    /// Convert tree to compact summary format
+    /// 
+    /// Returns a condensed view showing only interactive elements and their key properties.
+    public func toSummary() -> String {
+        var result = "UI Tree Summary:\n"
+        appendSummaryToString(&result, indentLevel: 0)
+        return result
+    }
+    
+    private func appendToString(_ result: inout String, indentLevel: Int) {
+        let indent = String(repeating: "  ", count: indentLevel)
+        let title = element.title ?? "nil"
+        let value = element.value ?? "nil"
+        let identifier = element.identifier ?? "nil"
+        let bounds = "(\(Int(element.bounds.minX)), \(Int(element.bounds.minY)), \(Int(element.bounds.width))x\(Int(element.bounds.height)))"
+        
+        result += "\(indent)[\(element.role.rawValue)] title='\(title)' value='\(value)' id='\(identifier)' bounds=\(bounds) enabled=\(element.isEnabled)\n"
+        
+        for child in children {
+            child.appendToString(&result, indentLevel: indentLevel + 1)
+        }
+    }
+    
+    private func appendSummaryToString(_ result: inout String, indentLevel: Int) {
+        let indent = String(repeating: "  ", count: indentLevel)
+        
+        // Only show interactive or meaningful elements
+        let isImportant = element.role.isClickable || 
+                         element.role.isTextInput || 
+                         !element.title.isNilOrEmpty ||
+                         !element.value.isNilOrEmpty ||
+                         element.role == .window ||
+                         element.role == .group
+        
+        if isImportant {
+            let title = element.title?.truncated(to: 30) ?? ""
+            let value = element.value?.truncated(to: 20) ?? ""
+            let roleDisplay = element.role.displayName
+            
+            var parts: [String] = [roleDisplay]
+            if !title.isEmpty { parts.append("'\(title)'") }
+            if !value.isEmpty { parts.append("value: '\(value)'") }
+            if !element.isEnabled { parts.append("(disabled)") }
+            
+            result += "\(indent)\(parts.joined(separator: " "))\n"
+        }
+        
+        for child in children {
+            child.appendSummaryToString(&result, indentLevel: indentLevel + (isImportant ? 1 : 0))
+        }
+    }
+    
+    /// Find all elements matching a condition in the tree
+    public func findElements(where condition: (UIElement) -> Bool) -> [UIElement] {
+        var results: [UIElement] = []
+        
+        if condition(element) {
+            results.append(element)
+        }
+        
+        for child in children {
+            results.append(contentsOf: child.findElements(where: condition))
+        }
+        
+        return results
+    }
+    
+    /// Get all clickable elements in the tree
+    public var clickableElements: [UIElement] {
+        return findElements { $0.role.isClickable && $0.isEnabled }
+    }
+    
+    /// Get all text input elements in the tree
+    public var textInputElements: [UIElement] {
+        return findElements { $0.role.isTextInput && $0.isEnabled }
+    }
+}
+
+// MARK: - Extensions
+
+extension String? {
+    var isNilOrEmpty: Bool {
+        return self?.isEmpty ?? true
+    }
+}
+
+extension String {
+    func truncated(to length: Int) -> String {
+        if self.count <= length {
+            return self
+        }
+        return String(self.prefix(length)) + "..."
+    }
+}
+
+extension ElementRole {
+    var displayName: String {
+        switch self {
+        case .button: return "Button"
+        case .textField: return "TextField" 
+        case .searchField: return "SearchField"
+        case .menuItem: return "MenuItem"
+        case .menuBar: return "MenuBar"
+        case .menuBarItem: return "MenuBarItem"
+        case .checkBox: return "CheckBox"
+        case .radioButton: return "RadioButton"
+        case .link: return "Link"
+        case .tab: return "Tab"
+        case .window: return "Window"
+        case .staticText: return "Text"
+        case .group: return "Group"
+        case .scrollArea: return "ScrollArea"
+        case .image: return "Image"
+        case .list: return "List"
+        case .table: return "Table"
+        case .cell: return "Cell"
+        case .popUpButton: return "PopUpButton"
+        case .slider: return "Slider"
+        case .unknown: return "Unknown"
+        }
+    }
+}
+
 // MARK: - Result Types (v3.0)
 
 /// Action-specific data for different types of operations

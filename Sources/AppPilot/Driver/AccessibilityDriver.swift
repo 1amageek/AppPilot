@@ -23,6 +23,10 @@ public protocol AccessibilityDriver: Sendable {
     // Cache Management
     func clearElementCache(for window: WindowHandle?) async
     
+    // UI Tree Dumping
+    func dumpUITree(for window: WindowHandle, maxDepth: Int) async throws -> String
+    func getUITree(for window: WindowHandle, maxDepth: Int) async throws -> UIElementTree
+    
     // Event Monitoring
     func observeEvents(for window: WindowHandle, mask: AXMask) async -> AsyncStream<AXEvent>
     func checkPermission() async -> Bool
@@ -257,7 +261,7 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
     
     private func generateWindowHandle(for axWindow: AXUIElement, appHandle: AppHandle) async throws -> WindowHandle {
         // Create a consistent ID based on window properties
-        let windowID = createConsistentWindowID(for: axWindow, appHandle: appHandle)
+        let windowID = try createConsistentWindowID(for: axWindow, appHandle: appHandle)
         
         // Check if we already have a handle for this window
         if let existingData = windowHandles[windowID] {
@@ -276,15 +280,19 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
         return handle
     }
     
-    private func createConsistentWindowID(for axWindow: AXUIElement, appHandle: AppHandle) -> String {
+    private func createConsistentWindowID(for axWindow: AXUIElement, appHandle: AppHandle) throws -> String {
         // Try to get window title for consistency
         let title = getStringAttribute(from: axWindow, attribute: kAXTitleAttribute) ?? "NoTitle"
         
         // Get window position for additional uniqueness
-        let position = getPositionAttribute(from: axWindow) ?? CGPoint.zero
+        guard let position = getPositionAttribute(from: axWindow) else {
+            throw PilotError.accessibilityTreeUnavailable(WindowHandle(id: "position_unavailable"))
+        }
         
         // Get window size
-        let size = getSizeAttribute(from: axWindow) ?? CGSize.zero
+        guard let size = getSizeAttribute(from: axWindow) else {
+            throw PilotError.accessibilityTreeUnavailable(WindowHandle(id: "size_unavailable"))
+        }
         
         // Create a consistent ID based on app + title + position + size
         let components = [
@@ -366,8 +374,8 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
         let identifier = getStringAttribute(from: axElement, attribute: kAXIdentifierAttribute)
         let isEnabled = getBoolAttribute(from: axElement, attribute: kAXEnabledAttribute) ?? true
         
-        // Get element bounds
-        let bounds = (try? getElementBounds(from: axElement)) ?? CGRect.zero
+        // Get element bounds - fail if bounds cannot be determined
+        let bounds = try getElementBounds(from: axElement)
         
         // Generate unique ID based on actual element properties
         let elementId = "\(windowHandle.id)_\(roleString)_\(depth)_\(title?.hashValue ?? identifier?.hashValue ?? Int.random(in: 1000...9999))"
@@ -460,8 +468,7 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
     
     public func getValue(from element: UIElement) async throws -> String? {
         guard let axElement = elementRefs[element.id] else {
-            // Element reference not found, try to return cached value
-            return element.value
+            throw PilotError.elementNotAccessible(element.id)
         }
         
         // Get live value from the AXUIElement
@@ -521,6 +528,86 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
             elementCache.removeAll()
             elementRefs.removeAll()
         }
+    }
+    
+    // MARK: - UI Tree Dumping
+    
+    public func dumpUITree(for window: WindowHandle, maxDepth: Int = 5) async throws -> String {
+        let tree = try await getUITree(for: window, maxDepth: maxDepth)
+        return tree.toString()
+    }
+    
+    public func getUITree(for window: WindowHandle, maxDepth: Int = 5) async throws -> UIElementTree {
+        guard await checkPermission() else {
+            throw PilotError.permissionDenied("Accessibility permission required for UI tree analysis")
+        }
+        
+        guard let windowData = windowHandles[window.id] else {
+            throw PilotError.windowNotFound(window)
+        }
+        
+        return try await buildUITree(from: windowData.axWindow, windowHandle: window, depth: 0, maxDepth: maxDepth)
+    }
+    
+    private func buildUITree(from axElement: AXUIElement, windowHandle: WindowHandle, depth: Int, maxDepth: Int) async throws -> UIElementTree {
+        guard depth <= maxDepth else {
+            // Return empty tree for elements beyond max depth
+            let dummyElement = UIElement(
+                id: "depth_limit_\(depth)",
+                role: .unknown,
+                title: "...",
+                bounds: CGRect.zero,
+                isEnabled: false
+            )
+            return UIElementTree(element: dummyElement, children: [], depth: depth)
+        }
+        
+        // Create UIElement for current AX element
+        let element = try createUIElementForTree(from: axElement, windowHandle: windowHandle, depth: depth)
+        
+        // Get children
+        var children: [UIElementTree] = []
+        var childrenRef: CFTypeRef?
+        let result = AXUIElementCopyAttributeValue(axElement, kAXChildrenAttribute as CFString, &childrenRef)
+        
+        if result == .success, let axChildren = childrenRef as? [AXUIElement] {
+            for child in axChildren.prefix(20) { // Limit children to prevent excessive output
+                do {
+                    let childTree = try await buildUITree(from: child, windowHandle: windowHandle, depth: depth + 1, maxDepth: maxDepth)
+                    children.append(childTree)
+                } catch {
+                    // Skip children that can't be processed
+                    continue
+                }
+            }
+        }
+        
+        return UIElementTree(element: element, children: children, depth: depth)
+    }
+    
+    private func createUIElementForTree(from axElement: AXUIElement, windowHandle: WindowHandle, depth: Int) throws -> UIElement {
+        let roleString = getStringAttribute(from: axElement, attribute: kAXRoleAttribute) ?? "AXUnknown"
+        let role = ElementRole(rawValue: roleString) ?? .unknown
+        let title = getStringAttribute(from: axElement, attribute: kAXTitleAttribute)
+        let value = getStringAttribute(from: axElement, attribute: kAXValueAttribute)
+        let identifier = getStringAttribute(from: axElement, attribute: kAXIdentifierAttribute)
+        let isEnabled = getBoolAttribute(from: axElement, attribute: kAXEnabledAttribute) ?? true
+        
+        // Get element bounds
+        let bounds = try getElementBounds(from: axElement)
+        
+        // Generate ID for tree (simpler than the cached version)
+        let elementId = "\(windowHandle.id)_\(roleString)_\(depth)_\(title?.hashValue ?? identifier?.hashValue ?? bounds.hashValue)"
+        
+        return UIElement(
+            id: elementId,
+            role: role,
+            title: title,
+            value: value,
+            identifier: identifier,
+            bounds: bounds,
+            isEnabled: isEnabled
+        )
     }
     
     // MARK: - Event Monitoring
