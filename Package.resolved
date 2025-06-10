@@ -1,0 +1,24 @@
+{
+  "originHash" : "d876928be16dc1e685dccbb5b46a85ba9ff00b2ce28492fff873ebfe4189a20e",
+  "pins" : [
+    {
+      "identity" : "axui",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/1amageek/AXUI.git",
+      "state" : {
+        "branch" : "main",
+        "revision" : "b371f3629b50dd902e40a3cb6e29a708f6b09a19"
+      }
+    },
+    {
+      "identity" : "swift-argument-parser",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/apple/swift-argument-parser.git",
+      "state" : {
+        "revision" : "011f0c765fb46d9cac61bca19be0527e99c98c8b",
+        "version" : "1.5.1"
+      }
+    }
+  ],
+  "version" : 3
+}

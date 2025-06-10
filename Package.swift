@@ -9,20 +9,16 @@ let package = Package(
     products: [
         .library(
             name: "AppPilot",
-            targets: ["AppPilot"]),
-        .executable(
-            name: "BasicUsage",
-            targets: ["BasicUsage"]),
+            targets: ["AppPilot"])
     ],
     dependencies: [
+        .package(url: "https://github.com/1amageek/AXUI.git", branch: "main")
     ],
     targets: [
         .target(
-            name: "AppPilot"),
-        .executableTarget(
-            name: "BasicUsage",
-            dependencies: ["AppPilot"],
-            path: "Examples"),
+            name: "AppPilot",
+            dependencies: ["AXUI"]
+        ),
         .testTarget(
             name: "AppPilotTests",
             dependencies: [
