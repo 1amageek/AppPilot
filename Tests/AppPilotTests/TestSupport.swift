@@ -160,297 +160,111 @@ actor TestSession {
     func navigateToTab() async throws {
         print("🧭 Navigating to \(testType) tab...")
         
-        // First ensure window is active
-        try await activateWindow()
-        
-        // Determine target tab index based on test type
-        let targetIndex: Int
-        let targetName: String
-        
+        // Map test types to expected image identifiers (from debug output)
+        let imageIdentifier: String
         switch testType {
         case .mouseClick:
-            targetIndex = 0
-            targetName = "Mouse Click"
+            imageIdentifier = "cursorarrow.click"
         case .keyboard:
-            targetIndex = 1
-            targetName = "Keyboard"
+            imageIdentifier = "keyboard"
         case .wait:
-            targetIndex = 2
-            targetName = "Wait"
+            imageIdentifier = "clock"
         }
         
-        print("\n🎯 Target: \(targetName) (index \(targetIndex))")
+        // Debug: List all elements to understand the structure
+        let allElements = try await pilot.findElements(in: window.id)
+        let imageElements = allElements.filter { $0.role == .image }
+        let rowElements = allElements.filter { $0.role == .row }
         
-        // Check if we're already on the correct tab by window title
-        if window.title?.contains(targetName) == true {
-            print("✅ Already on \(targetName) tab - no navigation needed")
-            return
+        print("🔍 Found \(imageElements.count) image elements:")
+        for img in imageElements {
+            print("   - Image: value='\(img.value ?? "NO_VALUE")' id='\(img.identifier ?? "NO_ID")' at (\(String(format: "%.1f", img.centerPoint.x)), \(String(format: "%.1f", img.centerPoint.y)))")
         }
         
-        // Get current UI elements with detailed analysis
-        let elements = try await pilot.findElements(in: window.id)
-        print("🔍 Found \(elements.count) total elements in window")
-        print("   Window bounds: \(window.bounds)")
-        
-        // ⭐ Enhanced UI Tree Analysis with detailed debugging
-        print("\n📊 Complete UI Tree Analysis:")
-        let sortedByPosition = elements.sorted { $0.centerPoint.y < $1.centerPoint.y }
-        
-        for (index, element) in sortedByPosition.enumerated() {
-            let isInSidebar = element.centerPoint.x < (window.bounds.minX + 250)
-            let sidebarMarker = isInSidebar ? " [SIDEBAR]" : ""
-            print("   \(String(format: "%3d", index + 1)). \(element.role.rawValue)\(sidebarMarker)")
-            print("       Position: (\(String(format: "%.1f", element.centerPoint.x)), \(String(format: "%.1f", element.centerPoint.y)))")
-            print("       Bounds: \(element.bounds)")
-            print("       Title: '\(element.title ?? "NO_TITLE")'")
-            print("       ID: '\(element.identifier ?? "NO_ID")'")
-            print("       Enabled: \(element.isEnabled)")
+        print("🔍 Found \(rowElements.count) row elements:")
+        for row in rowElements {
+            print("   - Row: bounds=(\(String(format: "%.0f", row.bounds.minX)), \(String(format: "%.0f", row.bounds.minY)), \(String(format: "%.0f", row.bounds.width))x\(String(format: "%.0f", row.bounds.height)))")
         }
         
-        // Find navigation elements in left sidebar with corrected bounds
-        let leftPanelMaxX = window.bounds.minX + 250  // 250px from left edge of window
-        let sidebarElements = elements.filter { element in
-            let isInLeftPanel = element.centerPoint.x >= window.bounds.minX && element.centerPoint.x <= leftPanelMaxX
-            let hasReasonableSize = element.bounds.width > 100 && element.bounds.height > 30
-            let isNavigationRole = (element.role == .cell || element.role == .unknown)
+        // Strategy 1: Find the target image by identifier
+        var targetIcon: UIElement?
+        
+        // Find the specific image with matching identifier
+        let imagesByIdentifier = imageElements.filter { $0.identifier == imageIdentifier }
+        if let foundImage = imagesByIdentifier.first {
+            targetIcon = foundImage
+            print("🎯 Found target image by identifier: '\(imageIdentifier)' at (\(String(format: "%.1f", foundImage.centerPoint.x)), \(String(format: "%.1f", foundImage.centerPoint.y)))")
+        } else {
+            print("⚠️ Image with identifier '\(imageIdentifier)' not found")
             
-            let looksLikeNavItem = isInLeftPanel && hasReasonableSize && isNavigationRole
+            // Strategy 2: Fallback - try to find by row containing the image
+            print("🔄 Trying fallback strategy: search by row...")
             
-            if looksLikeNavItem {
-                print("   🔍 Potential nav element: \(element.role.rawValue) at (\(String(format: "%.1f", element.centerPoint.x)), \(String(format: "%.1f", element.centerPoint.y))) size: \(element.bounds.width)x\(element.bounds.height)")
-            }
-            
-            return looksLikeNavItem
-        }
-        
-        print("\n📋 Sidebar Navigation Elements Analysis:")
-        print("   Found \(sidebarElements.count) potential navigation elements")
-        
-        // Sort by Y position to get tab order
-        let sortedTabs = sidebarElements.sorted { $0.centerPoint.y < $1.centerPoint.y }
-        
-        for (index, tab) in sortedTabs.enumerated() {
-            print("   Tab \(index): \(tab.role.rawValue) at (\(String(format: "%.1f", tab.centerPoint.x)), \(String(format: "%.1f", tab.centerPoint.y))) - '\(tab.title ?? "NO_TITLE")'")
-        }
-        
-        // Check if we have enough navigation elements
-        if sortedTabs.isEmpty {
-            print("❌ No navigation tabs found in sidebar")
-            // Since the window title already shows we're on Mouse Click, let's not fail
-            if targetName == "Mouse Click" {
-                print("   ⚠️ But we're already on Mouse Click tab based on window title")
-                return
-            }
-            throw TestSessionError.navigationFailed
-        }
-        
-        // Try element-based navigation with enhanced debugging
-        var navigationSuccessful = false
-        var clickedElement: UIElement?
-        
-        // Look for image elements that might indicate navigation (used across strategies)
-        let imageElements = elements.filter { element in
-            element.role == .image && 
-            element.centerPoint.x >= 589 && element.centerPoint.x <= 839 &&
-            element.centerPoint.y <= -850
-        }
-        
-        // Strategy 1: Find by image identifier (TestApp uses image icons for navigation)
-        print("\n🔍 Strategy 1: Icon/Image-based navigation")
-        
-        print("   Found \(imageElements.count) image elements in sidebar:")
-        for (index, img) in imageElements.enumerated() {
-            print("     \(index + 1). Image ID: '\(img.identifier ?? "NO_ID")' at (\(String(format: "%.1f", img.centerPoint.x)), \(String(format: "%.1f", img.centerPoint.y)))")
-        }
-        
-        // Map test types to expected image identifiers
-        let expectedImageIds: [TestType: [String]] = [
-            .mouseClick: ["cursorarrow.click", "cursor", "mouse"],
-            .keyboard: ["keyboard"],
-            .wait: ["clock", "timer"]
-        ]
-        
-        if let expectedIds = expectedImageIds[testType] {
-            for expectedId in expectedIds {
-                if let imageElement = imageElements.first(where: { img in
-                    img.identifier?.contains(expectedId) == true
-                }) {
-                    print("   🎯 Found matching image icon: '\(imageElement.identifier ?? "NO_ID")'")
-                    print("      Coordinates: (\(String(format: "%.1f", imageElement.centerPoint.x)), \(String(format: "%.1f", imageElement.centerPoint.y)))")
+            // Look for rows that might contain our target
+            for row in rowElements {
+                // Get all elements within this row's bounds
+                let elementsInRow = allElements.filter { element in
+                    row.bounds.contains(CGPoint(x: element.centerPoint.x, y: element.centerPoint.y))
+                }
+                
+                // Check if any image in this row has our target identifier
+                let hasTargetImage = elementsInRow.filter { $0.role == .image }.contains { $0.identifier == imageIdentifier }
+                
+                if hasTargetImage {
+                    print("🎯 Found row containing target image, clicking row instead")
+                    let result = try await pilot.click(element: row)
                     
-                    let result = try await pilot.click(window: window.id, at: imageElement.centerPoint)
                     if result.success {
-                        navigationSuccessful = true
-                        clickedElement = imageElement
-                        print("   ✅ Icon-based navigation successful")
-                        break
-                    } else {
-                        print("   ❌ Icon-based click failed")
+                        print("✅ Navigation successful via row click")
+                        try await Task.sleep(nanoseconds: 500_000_000) // 500ms for UI update
+                        try await refreshWindow()
+                        return
                     }
                 }
             }
-        }
-        
-        // Strategy 2: Use cell elements containing navigation icons
-        if !navigationSuccessful {
-            print("\n🔍 Strategy 2: Cell-based navigation (click parent cells)")
             
-            // Find cells that might contain navigation icons
-            let cellElements = elements.filter { element in
-                element.role == .cell &&
-                element.centerPoint.x >= 589 && element.centerPoint.x <= 839 &&
-                element.centerPoint.y <= -850 &&
-                element.bounds.width > 200 && element.bounds.height > 40
-            }
-            
-            print("   Found \(cellElements.count) cell elements:")
-            for (index, cell) in cellElements.enumerated() {
-                print("     \(index + 1). Cell at (\(String(format: "%.1f", cell.centerPoint.x)), \(String(format: "%.1f", cell.centerPoint.y))) size: \(cell.bounds.width)x\(cell.bounds.height)")
-            }
-            
-            // Sort cells by Y position (top to bottom)
-            let sortedCells = cellElements.sorted { $0.centerPoint.y < $1.centerPoint.y }
-            
-            if targetIndex < sortedCells.count {
-                let targetCell = sortedCells[targetIndex]
-                print("   🎯 Clicking cell at index \(targetIndex)")
-                print("      Cell coordinates: (\(String(format: "%.1f", targetCell.centerPoint.x)), \(String(format: "%.1f", targetCell.centerPoint.y)))")
-                
-                let result = try await pilot.click(window: window.id, at: targetCell.centerPoint)
-                if result.success {
-                    navigationSuccessful = true
-                    clickedElement = targetCell
-                    print("   ✅ Cell-based navigation successful")
-                } else {
-                    print("   ❌ Cell-based click failed")
-                }
-            } else {
-                print("   ❌ Target index \(targetIndex) >= available cells (\(sortedCells.count))")
-            }
-        }
-        
-        // Strategy 3: Use broader sidebar elements (AXUnknown)
-        if !navigationSuccessful {
-            print("\n🔍 Strategy 3: Sidebar AXUnknown elements navigation")
-            if targetIndex < sortedTabs.count {
-                let targetElement = sortedTabs[targetIndex]
-                print("   🎯 Clicking sidebar element at index \(targetIndex)")
-                print("      Element: \(targetElement.role.rawValue)")
-                print("      Coordinates: (\(String(format: "%.1f", targetElement.centerPoint.x)), \(String(format: "%.1f", targetElement.centerPoint.y)))")
-                
-                let result = try await pilot.click(window: window.id, at: targetElement.centerPoint)
-                if result.success {
-                    navigationSuccessful = true
-                    clickedElement = targetElement
-                    print("   ✅ Sidebar element navigation successful")
-                } else {
-                    print("   ❌ Sidebar element click failed")
-                }
-            } else {
-                print("   ❌ Target index \(targetIndex) >= available sidebar elements (\(sortedTabs.count))")
-            }
-        }
-        
-        // Strategy 4: Fallback coordinate-based approach
-        if !navigationSuccessful {
-            print("\n🔍 Strategy 4: Coordinate-based fallback")
-            
-            // Calculate fallback positions based on sidebar analysis
-            let fallbackPositions: [Point]
-            if !sortedTabs.isEmpty {
-                // Use actual sidebar elements to estimate positions
-                let firstTabY = sortedTabs[0].centerPoint.y
-                let avgSpacing: CGFloat = sortedTabs.count > 1 ? 
-                    (sortedTabs[1].centerPoint.y - sortedTabs[0].centerPoint.y) : 40
-                let avgX = sortedTabs.map { $0.centerPoint.x }.reduce(0, +) / CGFloat(sortedTabs.count)
-                
-                fallbackPositions = [
-                    Point(x: avgX, y: firstTabY + CGFloat(targetIndex) * avgSpacing),
-                    Point(x: 150, y: window.bounds.minY + 100 + CGFloat(targetIndex) * 40),
-                    Point(x: 125, y: window.bounds.minY + 120 + CGFloat(targetIndex) * 35)
-                ]
-            } else {
-                // Absolute fallback based on window
-                fallbackPositions = [
-                    Point(x: 150, y: window.bounds.minY + 100 + CGFloat(targetIndex) * 40),
-                    Point(x: 125, y: window.bounds.minY + 120 + CGFloat(targetIndex) * 35),
-                    Point(x: 175, y: window.bounds.minY + 140 + CGFloat(targetIndex) * 30)
-                ]
-            }
-            
-            for (index, fallbackPoint) in fallbackPositions.enumerated() {
-                print("   Fallback attempt \(index + 1): (\(String(format: "%.1f", fallbackPoint.x)), \(String(format: "%.1f", fallbackPoint.y)))")
-                let result = try await pilot.click(window: window.id, at: fallbackPoint)
-                if result.success {
-                    print("   ✅ Coordinate fallback \(index + 1) successful")
-                    navigationSuccessful = true
-                    break
-                } else {
-                    print("   ❌ Coordinate fallback \(index + 1) failed")
-                }
-                
-                // Small delay between attempts
-                try await Task.sleep(nanoseconds: 300_000_000)
-            }
-        }
-        
-        // Final verification before proceeding
-        if !navigationSuccessful {
-            print("❌ ALL NAVIGATION STRATEGIES FAILED")
-            print("   Tried: Icon-based, Cell-based, Sidebar element-based, Coordinate fallback")
-            print("   Available sidebar elements: \(sortedTabs.count)")
-            print("   Target: \(targetName) (index \(targetIndex))")
-            print("   Image elements found: \(imageElements.count)")
             throw TestSessionError.navigationFailed
         }
         
-        print("✅ Navigation successful using \(clickedElement != nil ? "element-based" : "coordinate-based") approach")
-        
-        // Wait for UI to update after navigation
-        try await Task.sleep(nanoseconds: 800_000_000) // 800ms standard wait time
-        
-        // Refresh window info after navigation
-        try await refreshWindow()
-        
-        // ⭐ Enhanced navigation verification with detailed content analysis
-        print("\n🔍 Verifying navigation success...")
-        let verificationElements = try await pilot.findElements(in: window.id)
-        
-        let verificationResult: Bool
-        switch testType {
-        case .mouseClick:
-            let buttons = verificationElements.filter { $0.role == .button }
-            let clickableElements = verificationElements.filter { 
-                $0.role == .button && $0.centerPoint.x > 300 && $0.isEnabled 
-            }
-            print("   Found \(buttons.count) buttons, \(clickableElements.count) in content area")
-            verificationResult = clickableElements.count > 0
+        // Strategy 3: Click the target image directly
+        if let icon = targetIcon {
+            print("🔄 Clicking target image directly")
+            let result = try await pilot.click(element: icon)
             
-        case .keyboard:
-            let textFields = verificationElements.filter { $0.role == .textField }
-            let inputElements = verificationElements.filter { 
-                $0.role == .textField && $0.centerPoint.x > 300 
+            if result.success {
+                print("✅ Navigation successful via direct image click")
+                try await Task.sleep(nanoseconds: 500_000_000) // 500ms for UI update
+                try await refreshWindow()
+            } else {
+                print("❌ Direct image click failed, trying parent row")
+                
+                // Strategy 4: Fallback to parent row click
+                print("🔍 Searching for parent row containing the target image...")
+                
+                for row in rowElements {
+                    // Check if the image is within this row's bounds
+                    if row.bounds.contains(CGPoint(x: icon.centerPoint.x, y: icon.centerPoint.y)) {
+                        print("🎯 Found parent row, clicking row as fallback")
+                        do {
+                            let result = try await pilot.click(element: row)
+                            
+                            if result.success {
+                                print("✅ Navigation successful via parent row click")
+                                try await Task.sleep(nanoseconds: 500_000_000) // 500ms for UI update
+                                try await refreshWindow()
+                                return
+                            }
+                        } catch {
+                            print("⚠️ Row click failed: \(error)")
+                            continue
+                        }
+                    }
+                }
+                
+                print("❌ All navigation attempts failed")
+                throw TestSessionError.navigationFailed
             }
-            print("   Found \(textFields.count) text fields, \(inputElements.count) in content area")
-            verificationResult = inputElements.count > 0
-            
-        case .wait:
-            let waitElements = verificationElements.filter { element in
-                element.title?.localizedCaseInsensitiveContains("wait") ?? false ||
-                element.title?.localizedCaseInsensitiveContains("second") ?? false
-            }
-            print("   Found \(waitElements.count) wait-related elements")
-            verificationResult = waitElements.count > 0
         }
-        
-        if verificationResult {
-            print("✅ Navigation verification successful - correct tab content detected")
-        } else {
-            print("⚠️ Navigation verification inconclusive - expected content not found")
-            print("   This may indicate navigation to wrong tab or content not yet loaded")
-        }
-        
-        print("✅ Navigation to \(targetName) tab completed")
     }
 }
 

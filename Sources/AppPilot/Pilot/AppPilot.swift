@@ -122,26 +122,30 @@ public actor AppPilot {
     
     /// Find specific UI element
     /// 
-    /// Locates a single UI element by role and title. This method expects exactly one matching element.
+    /// Locates a single UI element by role and optional title/identifier. This method expects exactly one matching element.
     /// 
     /// - Parameters:
     ///   - window: The window to search within
     ///   - role: The element role to search for
-    ///   - title: The element title to search for (case-insensitive partial match)
+    ///   - title: Optional element title to search for (case-insensitive partial match)
+    ///   - identifier: Optional accessibility identifier to search for (exact match)
     /// - Returns: The matching `UIElement`
     /// - Throws: 
     ///   - `PilotError.elementNotFound` if no element matches the criteria
     ///   - `PilotError.multipleElementsFound` if multiple elements match
     ///   - `PilotError.windowNotFound` if the window is invalid
+    ///   - `PilotError.invalidArgument` if both title and identifier are nil
     public func findElement(
         in window: WindowHandle,
         role: ElementRole,
-        title: String
+        title: String? = nil,
+        identifier: String? = nil
     ) async throws -> UIElement {
         let element = try await accessibilityDriver.findElement(
             in: window,
             role: role,
-            title: title
+            title: title,
+            identifier: identifier
         )
         
         return element
@@ -160,7 +164,7 @@ public actor AppPilot {
         in window: WindowHandle,
         title: String
     ) async throws -> UIElement {
-        return try await findElement(in: window, role: .button, title: title)
+        return try await findElement(in: window, role: .button, title: title, identifier: nil)
     }
     
     /// Find text field

@@ -16,7 +16,7 @@ public protocol AccessibilityDriver: Sendable {
     
     // UI Element Discovery
     func findElements(in window: WindowHandle, role: ElementRole?, title: String?, identifier: String?) async throws -> [UIElement]
-    func findElement(in window: WindowHandle, role: ElementRole, title: String) async throws -> UIElement
+    func findElement(in window: WindowHandle, role: ElementRole, title: String?, identifier: String?) async throws -> UIElement
     func elementExists(_ element: UIElement) async throws -> Bool
     func getValue(from element: UIElement) async throws -> String?
     func setValue(_ value: String, for element: UIElement) async throws
@@ -188,49 +188,37 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
             throw PilotError.windowNotFound(windowHandle)
         }
         
-        // Use AXUI's efficient dumping with filtering
-        let filter = determineAXUIFilter(role: role)
-        let axDump: String
+        // Use AXUI's efficient dumping
+        let axDump = try AXDumper.dumpWindow(bundleIdentifier: bundleId, windowIndex: windowIndex)
         
-        if let filter = filter {
-            axDump = try AXDumper.dumpWindow(bundleIdentifier: bundleId, windowIndex: windowIndex, filter: filter)
-        } else {
-            axDump = try AXDumper.dumpWindow(bundleIdentifier: bundleId, windowIndex: windowIndex)
-        }
-        
-        // Parse AX dump and convert to UIElements
+        // Parse AX dump and convert to UIElements with improved filtering
         let axProperties = try AXParser.parse(content: axDump)
         let uiElements = try convertAXPropertiesToUIElements(axProperties, windowHandle: windowHandle, bundleId: bundleId, windowIndex: windowIndex)
         
-        // Apply additional filtering for title and identifier
-        let filteredElements = uiElements.filter { element in
-            // Match title if specified (case-insensitive, partial match)
-            if let title = title {
-                guard let elementTitle = element.title,
-                      elementTitle.localizedCaseInsensitiveContains(title) else { return false }
-            }
-            
-            // Match identifier if specified
-            if let identifier = identifier, element.identifier != identifier { return false }
-            
-            return true
-        }
-        
-        return filteredElements
+        // Apply precise filtering with AND logic
+        return filterElementsWithANDLogic(uiElements, role: role, title: title, identifier: identifier)
     }
     
-    public func findElement(in window: WindowHandle, role: ElementRole, title: String) async throws -> UIElement {
-        let elements = try await findElements(in: window, role: role, title: title, identifier: nil)
-        
-        if elements.isEmpty {
-            throw PilotError.elementNotFound(role: role, title: title)
+    public func findElement(in window: WindowHandle, role: ElementRole, title: String? = nil, identifier: String? = nil) async throws -> UIElement {
+        // At least one of title or identifier must be provided
+        guard title != nil || identifier != nil else {
+            throw PilotError.invalidArgument("Either title or identifier must be provided")
         }
         
-        if elements.count > 1 {
-            throw PilotError.multipleElementsFound(role: role, title: title, count: elements.count)
-        }
+        let elements = try await findElements(in: window, role: role, title: title, identifier: identifier)
         
-        return elements[0]
+        // Handle results with improved logic
+        switch elements.count {
+        case 0:
+            let criteria = [title.map {"title: '\($0)'"}, identifier.map {"identifier: '\($0)'"}].compactMap {$0}.joined(separator: ", ")
+            throw PilotError.elementNotFound(role: role, title: "\(role.rawValue) with \(criteria)")
+        case 1:
+            return elements[0]
+        default:
+            // Multiple matches - use refined selection logic
+            let refined = selectBestMatch(from: elements, role: role, title: title, identifier: identifier)
+            return refined
+        }
     }
     
     
@@ -344,86 +332,7 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
         return nil
     }
     
-    private func determineAXUIFilter(role: ElementRole?) -> String? {
-        guard let role = role else { return nil }
-        
-        switch role {
-        case .button:
-            return "button"
-        case .textField:
-            return "textfield"
-        case .checkBox:
-            return "checkbox"
-        case .radioButton:
-            return "radiobutton"
-        case .slider:
-            return "slider"
-        case .popUpButton:
-            return "popupbutton"
-        case .tab:
-            return "tab"
-        case .menuItem:
-            return "menuitem"
-        case .link:
-            return "link"
-        default:
-            return "interactive"  // For unknown interactive elements
-        }
-    }
     
-    private func convertAXPropertiesToUIElements(_ axProperties: AXProperties, windowHandle: WindowHandle, bundleId: String, windowIndex: Int, depth: Int = 0) throws -> [UIElement] {
-        var elements: [UIElement] = []
-        
-        // Convert current element if it has useful properties
-        if let role = axProperties.role, !role.isEmpty {
-            if let element = createUIElementFromAXProperties(axProperties, windowHandle: windowHandle, bundleId: bundleId, windowIndex: windowIndex, depth: depth) {
-                elements.append(element)
-            }
-        }
-        
-        // Process children recursively
-        for (_, child) in axProperties.children.enumerated() {
-            let childElements = try convertAXPropertiesToUIElements(child, windowHandle: windowHandle, bundleId: bundleId, windowIndex: windowIndex, depth: depth + 1)
-            elements.append(contentsOf: childElements)
-        }
-        
-        return elements
-    }
-    
-    private func createUIElementFromAXProperties(_ axProperties: AXProperties, windowHandle: WindowHandle, bundleId: String, windowIndex: Int, depth: Int) -> UIElement? {
-        guard let roleString = axProperties.role else { return nil }
-        
-        let role = ElementRole(rawValue: roleString) ?? .unknown
-        let title = axProperties.value  // AXUI uses 'value' for display text
-        let identifier = axProperties.identifier
-        let isEnabled = axProperties.enabled ?? true
-        
-        // Create bounds from position and size
-        let bounds: CGRect
-        if let position = axProperties.position, let size = axProperties.size {
-            bounds = CGRect(origin: position, size: size)
-        } else {
-            bounds = CGRect.zero
-        }
-        
-        // Generate unique ID
-        let elementId = "\(windowHandle.id)_\(bundleId)_\(windowIndex)_\(roleString)_\(depth)_\(title?.hashValue ?? identifier?.hashValue ?? Int.random(in: 1000...9999))"
-        
-        let uiElement = UIElement(
-            id: elementId,
-            role: role,
-            title: title,
-            value: axProperties.value,
-            identifier: identifier,
-            bounds: bounds,
-            isEnabled: isEnabled
-        )
-        
-        // Note: We don't store AXUIElement references from AXUI dumps
-        // These would need to be obtained fresh when performing actions
-        
-        return uiElement
-    }
     
     
     private func getStringAttribute(from element: AXUIElement, attribute: String) -> String? {
@@ -474,16 +383,26 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
     // MARK: - Element Value Operations
     
     public func getValue(from element: UIElement) async throws -> String? {
-        // For AXUI-based elements, we need to refresh the element data
-        // since we don't maintain persistent AXUIElement references
-        return try await refreshElementAndGetValue(element)
+        // Use cached AXUIElement if available
+        if let axElementRef = elementRefs[element.id] {
+            return getStringAttribute(from: axElementRef, attribute: kAXValueAttribute)
+        }
+        
+        // Fallback to live element search
+        let axElement = try await findLiveAXElement(for: element)
+        return getStringAttribute(from: axElement, attribute: kAXValueAttribute)
     }
     
     public func setValue(_ value: String, for element: UIElement) async throws {
-        // For AXUI-based elements, we need to find the current AXUIElement
-        let axElement = try await findLiveAXElement(for: element)
+        // Use cached AXUIElement if available
+        let axElement: AXUIElement
+        if let cachedElement = elementRefs[element.id] {
+            axElement = cachedElement
+        } else {
+            axElement = try await findLiveAXElement(for: element)
+        }
         
-        // Set the value using AXUIElementSetAttributeValue
+        // Direct value setting using AXUIElement reference
         let result = AXUIElementSetAttributeValue(axElement, kAXValueAttribute as CFString, value as CFString)
         
         switch result {
@@ -507,6 +426,15 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
     }
     
     public func elementExists(_ element: UIElement) async throws -> Bool {
+        // Use cached AXUIElement if available
+        if let axElementRef = elementRefs[element.id] {
+            // Direct AXUIElement reference validation (fast)
+            var value: CFTypeRef?
+            let result = AXUIElementCopyAttributeValue(axElementRef, kAXRoleAttribute as CFString, &value)
+            return result == .success
+        }
+        
+        // Fallback to element search if not cached
         do {
             let _ = try await findLiveAXElement(for: element)
             return true
@@ -515,11 +443,136 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
         }
     }
     
-    // MARK: - Helper Methods for Live Element Operations
+    // MARK: - Helper Methods for Improved Element Discovery
     
-    private func refreshElementAndGetValue(_ element: UIElement) async throws -> String? {
-        let axElement = try await findLiveAXElement(for: element)
-        return getStringAttribute(from: axElement, attribute: kAXValueAttribute)
+    private func convertAXPropertiesToUIElements(_ axProperties: AXProperties, windowHandle: WindowHandle, bundleId: String, windowIndex: Int, depth: Int = 0) throws -> [UIElement] {
+        var elements: [UIElement] = []
+        
+        // Convert current element if it has useful properties
+        if let role = axProperties.role, !role.isEmpty {
+            if let element = createUIElementFromAXProperties(axProperties, windowHandle: windowHandle, bundleId: bundleId, windowIndex: windowIndex, depth: depth) {
+                elements.append(element)
+            }
+        }
+        
+        // Process children recursively
+        for (_, child) in axProperties.children.enumerated() {
+            let childElements = try convertAXPropertiesToUIElements(child, windowHandle: windowHandle, bundleId: bundleId, windowIndex: windowIndex, depth: depth + 1)
+            elements.append(contentsOf: childElements)
+        }
+        
+        return elements
+    }
+    
+    private func createUIElementFromAXProperties(_ axProperties: AXProperties, windowHandle: WindowHandle, bundleId: String, windowIndex: Int, depth: Int) -> UIElement? {
+        guard let roleString = axProperties.role else { return nil }
+        
+        let role = ElementRole(rawValue: roleString) ?? .unknown
+        let title = axProperties.value  // AXUI uses 'value' for display text
+        let identifier = axProperties.identifier
+        let isEnabled = axProperties.enabled ?? true
+        
+        // Create bounds from position and size
+        let bounds: CGRect
+        if let position = axProperties.position, let size = axProperties.size {
+            bounds = CGRect(origin: position, size: size)
+        } else {
+            bounds = CGRect.zero
+        }
+        
+        // Generate unique ID
+        let elementId = "\(windowHandle.id)_\(bundleId)_\(windowIndex)_\(roleString)_\(depth)_\(title?.hashValue ?? identifier?.hashValue ?? Int.random(in: 1000...9999))"
+        
+        return UIElement(
+            id: elementId,
+            role: role,
+            title: title,
+            value: axProperties.value,
+            identifier: identifier,
+            bounds: bounds,
+            isEnabled: isEnabled
+        )
+    }
+    
+    private func filterElementsWithANDLogic(_ elements: [UIElement], role: ElementRole?, title: String?, identifier: String?) -> [UIElement] {
+        return elements.filter { element in
+            // AND logic: all specified criteria must match
+            
+            // Role matching
+            if let role = role, element.role != role {
+                return false
+            }
+            
+            // Title matching (case-insensitive, partial match)
+            if let title = title {
+                guard let elementTitle = element.title,
+                      elementTitle.localizedCaseInsensitiveContains(title) else {
+                    return false
+                }
+            }
+            
+            // Identifier matching (exact match)
+            if let identifier = identifier, element.identifier != identifier {
+                return false
+            }
+            
+            // Additional quality filters
+            return element.isEnabled &&
+                   element.bounds.width > 0 &&
+                   element.bounds.height > 0
+        }
+    }
+    
+    private func selectBestMatch(from elements: [UIElement], role: ElementRole, title: String?, identifier: String?) -> UIElement {
+        // 1. If identifier is specified, prefer exact identifier matches
+        if let identifier = identifier {
+            let identifierMatches = elements.filter { element in
+                element.identifier == identifier
+            }
+            
+            if identifierMatches.count == 1 {
+                return identifierMatches[0]
+            }
+            
+            if !identifierMatches.isEmpty {
+                // If multiple identifier matches, prefer enabled and visible ones
+                let qualityMatches = identifierMatches.filter { element in
+                    element.isEnabled && element.bounds.width > 0 && element.bounds.height > 0
+                }
+                return qualityMatches.isEmpty ? identifierMatches[0] : qualityMatches[0]
+            }
+        }
+        
+        // 2. If title is specified, prefer exact title matches
+        if let title = title {
+            let exactTitleMatches = elements.filter { element in
+                element.title?.lowercased() == title.lowercased()
+            }
+            
+            if exactTitleMatches.count == 1 {
+                return exactTitleMatches[0]
+            }
+            
+            if !exactTitleMatches.isEmpty {
+                // If multiple exact title matches, prefer enabled and visible ones
+                let qualityMatches = exactTitleMatches.filter { element in
+                    element.isEnabled && element.bounds.width > 0 && element.bounds.height > 0
+                }
+                return qualityMatches.isEmpty ? exactTitleMatches[0] : qualityMatches[0]
+            }
+        }
+        
+        // 3. Fallback: prefer enabled and visible elements
+        let qualityMatches = elements.filter { element in
+            element.isEnabled && element.bounds.width > 0 && element.bounds.height > 0
+        }
+        
+        if !qualityMatches.isEmpty {
+            return qualityMatches[0]
+        }
+        
+        // 4. Last resort: return the first element
+        return elements[0]
     }
     
     private func findLiveAXElement(for element: UIElement) async throws -> AXUIElement {
@@ -535,7 +588,12 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
         }
         
         // Find the element by traversing the AX tree based on its properties
-        return try await findElementInAXTree(windowData.axWindow, targetElement: element)
+        let axElement = try await findElementInAXTree(windowData.axWindow, targetElement: element)
+        
+        // Cache the found element for future use
+        elementRefs[element.id] = axElement
+        
+        return axElement
     }
     
     private func findElementInAXTree(_ rootAXElement: AXUIElement, targetElement: UIElement, depth: Int = 0, maxDepth: Int = 10) async throws -> AXUIElement {
@@ -576,10 +634,11 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
                 (identifier == target.identifier && identifier != nil))
     }
     
+    
     // MARK: - Cache Management
     
     public func clearElementCache(for window: WindowHandle?) async {
-        // Clear element references (no longer using cache mechanism)
+        // Clear element references for specified window or all windows
         if let window = window {
             let keysToRemove = elementRefs.keys.filter { $0.hasPrefix(window.id) }
             for key in keysToRemove {
@@ -601,7 +660,6 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
             throw PilotError.windowNotFound(window)
         }
         
-        // Use AXUI to get the bundle identifier and window index
         guard let appData = appHandles[windowData.appHandle.id],
               let bundleId = appData.app.bundleIdentifier else {
             throw PilotError.applicationNotFound(windowData.appHandle.id)
@@ -612,13 +670,11 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
             throw PilotError.windowNotFound(window)
         }
         
-        // Use AXUI's efficient dumping for hierarchical view
+        // Use AXUI's hierarchical dumping for tree view
         let axDump = try AXDumper.dumpWindow(bundleIdentifier: bundleId, windowIndex: windowIndex)
         
-        // Convert to JSON for more compact representation
-        let jsonOutput = try AXConverter.convertToPrettyJSON(axDump: axDump)
-        
-        return jsonOutput
+        // Return the AX dump as is for now
+        return axDump
     }
     
     public func getUITree(for window: WindowHandle, maxDepth: Int = 5) async throws -> UIElementTree {
@@ -630,7 +686,6 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
             throw PilotError.windowNotFound(window)
         }
         
-        // Use AXUI to get comprehensive window information
         guard let appData = appHandles[windowData.appHandle.id],
               let bundleId = appData.app.bundleIdentifier else {
             throw PilotError.applicationNotFound(windowData.appHandle.id)

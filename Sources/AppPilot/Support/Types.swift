@@ -257,6 +257,8 @@ public enum ElementRole: String, Sendable, CaseIterable, Codable {
     case popUpButton = "AXPopUpButton"
     /// A slider control
     case slider = "AXSlider"
+    /// A row in a list or outline
+    case row = "AXRow"
     /// An unknown or unsupported element type
     case unknown = "AXUnknown"
     
@@ -265,7 +267,7 @@ public enum ElementRole: String, Sendable, CaseIterable, Codable {
     /// Returns `true` for interactive elements like buttons, links, and form controls.
     public var isClickable: Bool {
         switch self {
-        case .button, .menuItem, .menuBarItem, .checkBox, .radioButton, .link, .tab, .popUpButton:
+        case .button, .menuItem, .menuBarItem, .checkBox, .radioButton, .link, .tab, .popUpButton, .row:
             return true
         default:
             return false
@@ -464,6 +466,7 @@ extension ElementRole {
         case .cell: return "Cell"
         case .popUpButton: return "PopUpButton"
         case .slider: return "Slider"
+        case .row: return "Row"
         case .unknown: return "Unknown"
         }
     }
