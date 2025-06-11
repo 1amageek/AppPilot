@@ -1,6 +1,7 @@
 import Foundation
 import CoreGraphics
 import AppKit
+import UniformTypeIdentifiers
 
 public actor AppPilot {
     private let cgEventDriver: CGEventDriver
@@ -1111,60 +1112,99 @@ public actor AppPilot {
         return windowImage
     }
     
-    
-    // MARK: - Tree and Debug Methods
-    
-    /// Dump UI element tree structure for debugging
+    /// Capture a complete UI snapshot of a window
     /// 
-    /// Returns a hierarchical representation of all UI elements in a window.
-    /// This is useful for debugging automation scripts and understanding the UI structure.
+    /// Creates a comprehensive snapshot containing both the visual state (screenshot) and
+    /// the structural state (UI element hierarchy) of a window. This is useful for debugging,
+    /// testing, and analyzing UI state at a specific point in time.
     /// 
-    /// - Parameters:
-    ///   - window: The window to analyze
-    ///   - maxDepth: Maximum tree depth to traverse (default: 5)
-    /// - Returns: A string representation of the UI tree structure
-    /// - Throws: `PilotError.windowNotFound` if the window is invalid
-    public func dumpUITree(
-        for window: WindowHandle,
-        maxDepth: Int = 5
-    ) async throws -> String {
-        return try await accessibilityDriver.dumpUITree(for: window, maxDepth: maxDepth)
-    }
-    
-    /// Get structured UI tree data for programmatic analysis
-    /// 
-    /// Returns the UI element hierarchy as structured data that can be analyzed
-    /// programmatically by AI or automation scripts.
+    /// The snapshot includes:
+    /// - Window screenshot as PNG data
+    /// - Complete UI element tree with AXUI optimized discovery
+    /// - Window metadata and timestamp
+    /// - Optional custom metadata for categorization
     /// 
     /// - Parameters:
-    ///   - window: The window to analyze
-    ///   - maxDepth: Maximum tree depth to traverse (default: 5)
-    /// - Returns: A hierarchical tree structure of UI elements
-    /// - Throws: `PilotError.windowNotFound` if the window is invalid
-    public func getUITree(
-        for window: WindowHandle,
-        maxDepth: Int = 5
-    ) async throws -> UIElementTree {
-        return try await accessibilityDriver.getUITree(for: window, maxDepth: maxDepth)
+    ///   - window: The window to snapshot
+    ///   - metadata: Optional metadata to attach to the snapshot
+    /// - Returns: A `UISnapshot` containing the window's visual and structural state
+    /// - Throws: 
+    ///   - `PilotError.windowNotFound` if the window handle is invalid
+    ///   - `PilotError.permissionDenied` if accessibility permission is not granted
+    /// 
+    /// ## Usage Example
+    /// ```swift
+    /// // Basic snapshot
+    /// let snapshot = try await pilot.snapshot(window: window)
+    /// 
+    /// // Snapshot with metadata
+    /// let snapshot = try await pilot.snapshot(
+    ///     window: window,
+    ///     metadata: SnapshotMetadata(
+    ///         description: "Before clicking submit button",
+    ///         tags: ["test", "form-submission"],
+    ///         customData: ["testCase": "TC-001"]
+    ///     )
+    /// )
+    /// 
+    /// // Analyze snapshot
+    /// let buttons = snapshot.clickableElements
+    /// print("Found \(buttons.count) clickable buttons")
+    /// 
+    /// // Save snapshot image
+    /// if let image = snapshot.image {
+    ///     // Use image...
+    /// }
+    /// ```
+    public func snapshot(
+        window: WindowHandle,
+        metadata: SnapshotMetadata? = nil
+    ) async throws -> UISnapshot {
+        // Get window information
+        let apps = try await listApplications()
+        var windowInfo: WindowInfo?
+        var targetApp: AppInfo?
+        
+        for app in apps {
+            do {
+                let windows = try await listWindows(app: app.id)
+                if let found = windows.first(where: { $0.id == window }) {
+                    windowInfo = found
+                    targetApp = app
+                    break
+                }
+            } catch {
+                continue
+            }
+        }
+        
+        guard let windowInfo = windowInfo, let _ = targetApp else {
+            throw PilotError.windowNotFound(window)
+        }
+        
+        // Capture window screenshot
+        let windowImage = try await capture(window: window)
+        
+        // Convert CGImage to PNG data
+        guard let imageData = windowImage.pngData() else {
+            throw PilotError.imageConversionFailed
+        }
+        
+        // Get all UI elements in the window using AXUI optimized discovery
+        let elements = try await findElements(in: window)
+        
+        // Create and return the snapshot
+        return UISnapshot(
+            windowHandle: window,
+            windowInfo: windowInfo,
+            elements: elements,
+            imageData: imageData,
+            timestamp: Date(),
+            metadata: metadata
+        )
     }
     
-    /// Get a compact summary of UI elements for AI analysis
-    /// 
-    /// Returns a condensed view of the UI tree showing only interactive elements.
-    /// This is optimized for AI consumption with reduced noise.
-    /// 
-    /// - Parameters:
-    ///   - window: The window to analyze
-    ///   - maxDepth: Maximum tree depth to traverse (default: 3)
-    /// - Returns: A compact string summary of interactive elements
-    /// - Throws: `PilotError.windowNotFound` if the window is invalid
-    public func getUISummary(
-        for window: WindowHandle,
-        maxDepth: Int = 3
-    ) async throws -> String {
-        let tree = try await getUITree(for: window, maxDepth: maxDepth)
-        return tree.toSummary()
-    }
+    
     
     // MARK: - Convenience Methods
     
@@ -1448,5 +1488,25 @@ extension InputSourceInfo {
         } else {
             return .automatic
         }
+    }
+}
+
+// MARK: - CGImage Extension
+
+extension CGImage {
+    /// Convert CGImage to PNG data
+    func pngData() -> Data? {
+        let cfData = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(cfData, UTType.png.identifier as CFString, 1, nil) else {
+            return nil
+        }
+        
+        CGImageDestinationAddImage(destination, self, nil)
+        
+        guard CGImageDestinationFinalize(destination) else {
+            return nil
+        }
+        
+        return cfData as Data
     }
 }

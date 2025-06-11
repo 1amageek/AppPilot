@@ -16,6 +16,7 @@ public enum PilotError: Error, Sendable {
     case userInterrupted
     case invalidArgument(String)
     case screenCaptureError(String)
+    case imageConversionFailed
 }
 
 extension PilotError: LocalizedError {
@@ -59,6 +60,8 @@ extension PilotError: LocalizedError {
             return "Invalid argument: \(message)"
         case .screenCaptureError(let message):
             return "Screen capture error: \(message)"
+        case .imageConversionFailed:
+            return "Failed to convert image to PNG data"
         }
     }
 }

@@ -313,118 +313,6 @@ public enum WaitSpec: Sendable {
     case uiChange(window: WindowHandle, timeout: TimeInterval)
 }
 
-// MARK: - UI Tree Structure
-
-/// Hierarchical representation of UI elements
-/// 
-/// `UIElementTree` represents the accessibility tree structure of a window,
-/// allowing for programmatic analysis of UI hierarchy and relationships.
-public struct UIElementTree: Sendable, Codable {
-    /// The UI element at this node
-    public let element: UIElement
-    /// Child elements in the tree
-    public let children: [UIElementTree]
-    /// Depth level in the tree (0 = root)
-    public let depth: Int
-    
-    public init(element: UIElement, children: [UIElementTree] = [], depth: Int = 0) {
-        self.element = element
-        self.children = children
-        self.depth = depth
-    }
-    
-    /// Convert tree to readable string format
-    /// 
-    /// Returns a formatted string representation of the UI tree with indentation
-    /// showing the hierarchy and all element properties.
-    /// 
-    /// ```swift
-    /// let tree = try await pilot.getUITree(for: window)
-    /// print(tree.toString())
-    /// ```
-    public func toString() -> String {
-        var result = ""
-        appendToString(&result, indentLevel: 0)
-        return result
-    }
-    
-    /// Convert tree to compact summary format
-    /// 
-    /// Returns a condensed view showing only interactive elements and their key properties.
-    public func toSummary() -> String {
-        var result = "UI Tree Summary:\n"
-        appendSummaryToString(&result, indentLevel: 0)
-        return result
-    }
-    
-    private func appendToString(_ result: inout String, indentLevel: Int) {
-        let indent = String(repeating: "  ", count: indentLevel)
-        let title = element.title ?? "nil"
-        let value = element.value ?? "nil"
-        let identifier = element.identifier ?? "nil"
-        let bounds = "(\(Int(element.bounds.minX)), \(Int(element.bounds.minY)), \(Int(element.bounds.width))x\(Int(element.bounds.height)))"
-        
-        result += "\(indent)[\(element.role.rawValue)] title='\(title)' value='\(value)' id='\(identifier)' bounds=\(bounds) enabled=\(element.isEnabled)\n"
-        
-        for child in children {
-            child.appendToString(&result, indentLevel: indentLevel + 1)
-        }
-    }
-    
-    private func appendSummaryToString(_ result: inout String, indentLevel: Int) {
-        let indent = String(repeating: "  ", count: indentLevel)
-        
-        // Only show interactive or meaningful elements
-        let isImportant = element.role.isClickable || 
-                         element.role.isTextInput || 
-                         !element.title.isNilOrEmpty ||
-                         !element.value.isNilOrEmpty ||
-                         element.role == .window ||
-                         element.role == .group
-        
-        if isImportant {
-            let title = element.title?.truncated(to: 30) ?? ""
-            let value = element.value?.truncated(to: 20) ?? ""
-            let roleDisplay = element.role.displayName
-            
-            var parts: [String] = [roleDisplay]
-            if !title.isEmpty { parts.append("'\(title)'") }
-            if !value.isEmpty { parts.append("value: '\(value)'") }
-            if !element.isEnabled { parts.append("(disabled)") }
-            
-            result += "\(indent)\(parts.joined(separator: " "))\n"
-        }
-        
-        for child in children {
-            child.appendSummaryToString(&result, indentLevel: indentLevel + (isImportant ? 1 : 0))
-        }
-    }
-    
-    /// Find all elements matching a condition in the tree
-    public func findElements(where condition: (UIElement) -> Bool) -> [UIElement] {
-        var results: [UIElement] = []
-        
-        if condition(element) {
-            results.append(element)
-        }
-        
-        for child in children {
-            results.append(contentsOf: child.findElements(where: condition))
-        }
-        
-        return results
-    }
-    
-    /// Get all clickable elements in the tree
-    public var clickableElements: [UIElement] {
-        return findElements { $0.role.isClickable && $0.isEnabled }
-    }
-    
-    /// Get all text input elements in the tree
-    public var textInputElements: [UIElement] {
-        return findElements { $0.role.isTextInput && $0.isEnabled }
-    }
-}
 
 // MARK: - Extensions
 
@@ -541,6 +429,137 @@ public struct ActionResult: Sendable, Codable {
         self.element = element
         self.coordinates = coordinates
         self.data = data
+    }
+}
+
+// MARK: - UI Snapshot
+
+/// A complete snapshot of UI state including window image and element hierarchy
+/// 
+/// `UISnapshot` captures both the visual state (screenshot) and structural state
+/// (UI element tree) of a window at a specific point in time. This is useful for
+/// debugging, testing, and analyzing UI state.
+/// 
+/// ```swift
+/// let snapshot = try await pilot.snapshot(window: window)
+/// 
+/// // Access the screenshot
+/// let image = snapshot.image
+/// 
+/// // Analyze UI elements
+/// let buttons = snapshot.elements.filter { $0.role == .button }
+/// print("Found \(buttons.count) buttons")
+/// 
+/// // Find specific element
+/// if let submitButton = snapshot.findElement(role: .button, title: "Submit") {
+///     print("Submit button at: \(submitButton.bounds)")
+/// }
+/// ```
+public struct UISnapshot: Sendable, Codable {
+    /// The window handle this snapshot belongs to
+    public let windowHandle: WindowHandle
+    
+    /// Window information at the time of snapshot
+    public let windowInfo: WindowInfo
+    
+    /// All UI elements discovered in the window
+    public let elements: [UIElement]
+    
+    /// PNG data of the window screenshot
+    public let imageData: Data
+    
+    /// When this snapshot was captured
+    public let timestamp: Date
+    
+    /// Optional metadata about the snapshot
+    public let metadata: SnapshotMetadata?
+    
+    public init(
+        windowHandle: WindowHandle,
+        windowInfo: WindowInfo,
+        elements: [UIElement],
+        imageData: Data,
+        timestamp: Date = Date(),
+        metadata: SnapshotMetadata? = nil
+    ) {
+        self.windowHandle = windowHandle
+        self.windowInfo = windowInfo
+        self.elements = elements
+        self.imageData = imageData
+        self.timestamp = timestamp
+        self.metadata = metadata
+    }
+    
+    /// Reconstructs the CGImage from stored PNG data
+    public var image: CGImage? {
+        guard let dataProvider = CGDataProvider(data: imageData as CFData),
+              let cgImage = CGImage(
+                pngDataProviderSource: dataProvider,
+                decode: nil,
+                shouldInterpolate: true,
+                intent: .defaultIntent
+              ) else {
+            return nil
+        }
+        return cgImage
+    }
+    
+    /// Find element by role and title in the snapshot
+    public func findElement(role: ElementRole, title: String? = nil) -> UIElement? {
+        elements.first { element in
+            element.role == role &&
+            (title == nil || element.title?.localizedCaseInsensitiveContains(title!) == true)
+        }
+    }
+    
+    /// Find all elements matching criteria
+    public func findElements(role: ElementRole? = nil, title: String? = nil) -> [UIElement] {
+        elements.filter { element in
+            (role == nil || element.role == role) &&
+            (title == nil || element.title?.localizedCaseInsensitiveContains(title!) == true)
+        }
+    }
+    
+    /// Get elements sorted by their position (top-left to bottom-right)
+    public var elementsByPosition: [UIElement] {
+        elements.sorted { e1, e2 in
+            if abs(e1.bounds.minY - e2.bounds.minY) < 5 {
+                return e1.bounds.minX < e2.bounds.minX
+            }
+            return e1.bounds.minY < e2.bounds.minY
+        }
+    }
+    
+    /// Get clickable elements only
+    public var clickableElements: [UIElement] {
+        elements.filter { $0.role.isClickable && $0.isEnabled }
+    }
+    
+    /// Get text input elements only
+    public var textInputElements: [UIElement] {
+        elements.filter { $0.role.isTextInput && $0.isEnabled }
+    }
+}
+
+/// Metadata about a UI snapshot
+public struct SnapshotMetadata: Sendable, Codable {
+    /// Optional description of what this snapshot captures
+    public let description: String?
+    
+    /// Tags for categorizing snapshots
+    public let tags: [String]
+    
+    /// Any additional custom data
+    public let customData: [String: String]
+    
+    public init(
+        description: String? = nil,
+        tags: [String] = [],
+        customData: [String: String] = [:]
+    ) {
+        self.description = description
+        self.tags = tags
+        self.customData = customData
     }
 }
 

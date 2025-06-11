@@ -395,6 +395,12 @@ public actor AppPilot {
     
     /// Capture screenshot of window
     public func capture(window: WindowHandle) async throws -> CGImage
+    
+    /// Capture complete UI snapshot (screenshot + element hierarchy)
+    public func snapshot(
+        window: WindowHandle,
+        metadata: SnapshotMetadata? = nil
+    ) async throws -> UISnapshot
 }
 
 public enum WaitSpec {
@@ -678,6 +684,7 @@ AppPilot uses TestApp for comprehensive automated testing following the **「見
 - Element discovery (`findElements()` with role/title/identifier)
 - Element-based actions (`click(element:)`, `type(text:into:)`)
 - Screenshot capture (`capture(window:)`)
+- UI snapshot capture (`snapshot(window:metadata:)`) - combines screenshot + element hierarchy
 - Gesture operations (`gesture(from:to:duration:)`)
 - Wait operations (`wait(.time)`, `wait(.uiChange)`)
 

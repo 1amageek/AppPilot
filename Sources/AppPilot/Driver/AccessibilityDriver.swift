@@ -24,9 +24,6 @@ public protocol AccessibilityDriver: Sendable {
     // Cache Management
     func clearElementCache(for window: WindowHandle?) async
     
-    // UI Tree Dumping
-    func dumpUITree(for window: WindowHandle, maxDepth: Int) async throws -> String
-    func getUITree(for window: WindowHandle, maxDepth: Int) async throws -> UIElementTree
     
     // Event Monitoring
     func observeEvents(for window: WindowHandle, mask: AXMask) async -> AsyncStream<AXEvent>
@@ -188,12 +185,11 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
             throw PilotError.windowNotFound(windowHandle)
         }
         
-        // Use AXUI's efficient dumping
-        let axDump = try AXDumper.dumpWindow(bundleIdentifier: bundleId, windowIndex: windowIndex)
+        // Use AXUI's flat element dumping
+        let axElements = try AXDumper.dumpWindow(bundleIdentifier: bundleId, windowIndex: windowIndex)
         
-        // Parse AX dump and convert to UIElements with improved filtering
-        let axProperties = try AXParser.parse(content: axDump)
-        let uiElements = try convertAXPropertiesToUIElements(axProperties, windowHandle: windowHandle, bundleId: bundleId, windowIndex: windowIndex)
+        // Convert AXElements to UIElements with improved filtering
+        let uiElements = convertAXElementsToUIElements(axElements, windowHandle: windowHandle)
         
         // Apply precise filtering with AND logic
         return filterElementsWithANDLogic(uiElements, role: role, title: title, identifier: identifier)
@@ -445,49 +441,36 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
     
     // MARK: - Helper Methods for Improved Element Discovery
     
-    private func convertAXPropertiesToUIElements(_ axProperties: AXProperties, windowHandle: WindowHandle, bundleId: String, windowIndex: Int, depth: Int = 0) throws -> [UIElement] {
-        var elements: [UIElement] = []
-        
-        // Convert current element if it has useful properties
-        if let role = axProperties.role, !role.isEmpty {
-            if let element = createUIElementFromAXProperties(axProperties, windowHandle: windowHandle, bundleId: bundleId, windowIndex: windowIndex, depth: depth) {
-                elements.append(element)
-            }
+    private func convertAXElementsToUIElements(_ axElements: [AXElement], windowHandle: WindowHandle) -> [UIElement] {
+        return axElements.compactMap { axElement in
+            createUIElementFromAXElement(axElement, windowHandle: windowHandle)
         }
-        
-        // Process children recursively
-        for (_, child) in axProperties.children.enumerated() {
-            let childElements = try convertAXPropertiesToUIElements(child, windowHandle: windowHandle, bundleId: bundleId, windowIndex: windowIndex, depth: depth + 1)
-            elements.append(contentsOf: childElements)
-        }
-        
-        return elements
     }
     
-    private func createUIElementFromAXProperties(_ axProperties: AXProperties, windowHandle: WindowHandle, bundleId: String, windowIndex: Int, depth: Int) -> UIElement? {
-        guard let roleString = axProperties.role else { return nil }
+    private func createUIElementFromAXElement(_ axElement: AXElement, windowHandle: WindowHandle) -> UIElement? {
+        guard let roleString = axElement.role else { return nil }
         
         let role = ElementRole(rawValue: roleString) ?? .unknown
-        let title = axProperties.value  // AXUI uses 'value' for display text
-        let identifier = axProperties.identifier
-        let isEnabled = axProperties.enabled ?? true
+        let title = axElement.description  // AXUI uses 'description' for display text
+        let identifier = axElement.identifier
+        let isEnabled = axElement.state?.enabled ?? true
         
         // Create bounds from position and size
         let bounds: CGRect
-        if let position = axProperties.position, let size = axProperties.size {
-            bounds = CGRect(origin: position, size: size)
+        if let position = axElement.position, let size = axElement.size {
+            bounds = CGRect(origin: CGPoint(x: position.x, y: position.y), size: CGSize(width: size.width, height: size.height))
         } else {
             bounds = CGRect.zero
         }
         
-        // Generate unique ID
-        let elementId = "\(windowHandle.id)_\(bundleId)_\(windowIndex)_\(roleString)_\(depth)_\(title?.hashValue ?? identifier?.hashValue ?? Int.random(in: 1000...9999))"
+        // Generate unique ID based on element properties
+        let elementId = "\(windowHandle.id)_\(roleString)_\(title?.hashValue ?? identifier?.hashValue ?? Int.random(in: 1000...9999))"
         
         return UIElement(
             id: elementId,
             role: role,
             title: title,
-            value: axProperties.value,
+            value: axElement.description,
             identifier: identifier,
             bounds: bounds,
             isEnabled: isEnabled
@@ -649,116 +632,6 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
         }
     }
     
-    // MARK: - UI Tree Dumping
-    
-    public func dumpUITree(for window: WindowHandle, maxDepth: Int = 5) async throws -> String {
-        guard await checkPermission() else {
-            throw PilotError.permissionDenied("Accessibility permission required for UI tree analysis")
-        }
-        
-        guard let windowData = windowHandles[window.id] else {
-            throw PilotError.windowNotFound(window)
-        }
-        
-        guard let appData = appHandles[windowData.appHandle.id],
-              let bundleId = appData.app.bundleIdentifier else {
-            throw PilotError.applicationNotFound(windowData.appHandle.id)
-        }
-        
-        let windows = try await getWindows(for: windowData.appHandle)
-        guard let windowIndex = windows.firstIndex(where: { $0.id == window }) else {
-            throw PilotError.windowNotFound(window)
-        }
-        
-        // Use AXUI's hierarchical dumping for tree view
-        let axDump = try AXDumper.dumpWindow(bundleIdentifier: bundleId, windowIndex: windowIndex)
-        
-        // Return the AX dump as is for now
-        return axDump
-    }
-    
-    public func getUITree(for window: WindowHandle, maxDepth: Int = 5) async throws -> UIElementTree {
-        guard await checkPermission() else {
-            throw PilotError.permissionDenied("Accessibility permission required for UI tree analysis")
-        }
-        
-        guard let windowData = windowHandles[window.id] else {
-            throw PilotError.windowNotFound(window)
-        }
-        
-        guard let appData = appHandles[windowData.appHandle.id],
-              let bundleId = appData.app.bundleIdentifier else {
-            throw PilotError.applicationNotFound(windowData.appHandle.id)
-        }
-        
-        let windows = try await getWindows(for: windowData.appHandle)
-        guard let windowIndex = windows.firstIndex(where: { $0.id == window }) else {
-            throw PilotError.windowNotFound(window)
-        }
-        
-        // Get hierarchical AX dump
-        let axDump = try AXDumper.dumpWindow(bundleIdentifier: bundleId, windowIndex: windowIndex)
-        let axProperties = try AXParser.parse(content: axDump)
-        
-        return try buildUITreeFromAXProperties(axProperties, windowHandle: window, bundleId: bundleId, windowIndex: windowIndex, depth: 0, maxDepth: maxDepth)
-    }
-    
-    private func buildUITreeFromAXProperties(_ axProperties: AXProperties, windowHandle: WindowHandle, bundleId: String, windowIndex: Int, depth: Int, maxDepth: Int) throws -> UIElementTree {
-        guard depth <= maxDepth else {
-            // Return empty tree for elements beyond max depth
-            let dummyElement = UIElement(
-                id: "depth_limit_\(depth)",
-                role: .unknown,
-                title: "...",
-                bounds: CGRect.zero,
-                isEnabled: false
-            )
-            return UIElementTree(element: dummyElement, children: [], depth: depth)
-        }
-        
-        // Create UIElement for current AX properties
-        let element = createUIElementFromAXPropertiesForTree(axProperties, windowHandle: windowHandle, bundleId: bundleId, windowIndex: windowIndex, depth: depth)
-        
-        // Process children
-        var children: [UIElementTree] = []
-        for (_, child) in axProperties.children.enumerated() {
-            if depth + 1 <= maxDepth {
-                let childTree = try buildUITreeFromAXProperties(child, windowHandle: windowHandle, bundleId: bundleId, windowIndex: windowIndex, depth: depth + 1, maxDepth: maxDepth)
-                children.append(childTree)
-            }
-        }
-        
-        return UIElementTree(element: element, children: children, depth: depth)
-    }
-    
-    private func createUIElementFromAXPropertiesForTree(_ axProperties: AXProperties, windowHandle: WindowHandle, bundleId: String, windowIndex: Int, depth: Int) -> UIElement {
-        let roleString = axProperties.role ?? "AXUnknown"
-        let role = ElementRole(rawValue: roleString) ?? .unknown
-        let title = axProperties.value  // AXUI uses 'value' for display text
-        let identifier = axProperties.identifier
-        let isEnabled = axProperties.enabled ?? true
-        
-        // Create bounds from position and size
-        let bounds: CGRect
-        if let position = axProperties.position, let size = axProperties.size {
-            bounds = CGRect(origin: position, size: size)
-        } else {
-            bounds = CGRect.zero
-        }
-        
-        // Generate ID for tree
-        let elementId = "\(windowHandle.id)_\(bundleId)_\(windowIndex)_\(roleString)_\(depth)_\(title?.hashValue ?? identifier?.hashValue ?? bounds.hashValue)"
-        
-        return UIElement(
-            id: elementId,
-            role: role,
-            title: title,
-            value: axProperties.value,
-            identifier: identifier,
-            bounds: bounds,
-            isEnabled: isEnabled
-        )
-    }
     
     // MARK: - Event Monitoring
     
