@@ -1,6 +1,7 @@
 import Testing
 import Foundation
 @testable import AppPilot
+import AXUI
 
 /// Unit tests for setValue functionality
 @Suite("setValue Unit Tests")
@@ -28,12 +29,16 @@ struct SetValueUnitTests {
         let originalResult = ActionResult(
             success: true,
             element: UIElement(
-                id: "test-element",
-                role: .textField,
-                title: "Test Field",
-                value: "Initial Value",
-                bounds: CGRect(x: 10, y: 20, width: 100, height: 30),
-                isEnabled: true
+                role: "Field",
+                description: "Test Field",
+                identifier: "test-element",
+                roleDescription: nil,
+                help: nil,
+                position: AXUI.Point(x: 10, y: 20),
+                size: AXUI.Size(width: 100, height: 30),
+                selected: false,
+                enabled: true,
+                focused: false
             ),
             coordinates: Point(x: 60.0, y: 35.0),
             data: .setValue(inputValue: "Input Text", actualValue: "Actual Text")
@@ -66,14 +71,20 @@ struct SetValueUnitTests {
     @Test("UIElement roles should support value setting correctly")
     func testUIElementRoleValueSettingSupport() async throws {
         // Test supported roles
-        let supportedRoles: [ElementRole] = [.textField, .searchField]
+        let supportedRoles: [ElementRole] = [.field]
         
         for role in supportedRoles {
             let element = UIElement(
-                id: "test-\(role.rawValue)",
-                role: role,
-                bounds: CGRect(x: 0, y: 0, width: 100, height: 30),
-                isEnabled: true
+                role: role.rawValue,
+                description: "Test Field",
+                identifier: "test-\(role.rawValue)",
+                roleDescription: nil,
+                help: nil,
+                position: AXUI.Point(x: 0, y: 0),
+                size: AXUI.Size(width: 100, height: 30),
+                selected: false,
+                enabled: true,
+                focused: false
             )
             
             // These roles should be considered text input
@@ -81,7 +92,7 @@ struct SetValueUnitTests {
             
             // Verify element can theoretically support setValue
             #expect(element.isEnabled, "Element should be enabled")
-            #expect(element.role.isTextInput, "Element role should support text input")
+            #expect(role.isTextInput, "Element role should support text input")
         }
         
         // Test unsupported roles
@@ -89,10 +100,16 @@ struct SetValueUnitTests {
         
         for role in unsupportedRoles {
             let _ = UIElement(
-                id: "test-\(role.rawValue)",
-                role: role,
-                bounds: CGRect(x: 0, y: 0, width: 100, height: 30),
-                isEnabled: true
+                role: role.rawValue,
+                description: "Test Element",
+                identifier: "test-\(role.rawValue)",
+                roleDescription: nil,
+                help: nil,
+                position: AXUI.Point(x: 0, y: 0),
+                size: AXUI.Size(width: 100, height: 30),
+                selected: false,
+                enabled: true,
+                focused: false
             )
             
             // These roles should not be considered text input
@@ -104,8 +121,7 @@ struct SetValueUnitTests {
     func testElementRoleIsTextInputProperty() async throws {
         // Test all known text input roles
         let textInputRoles: [(ElementRole, Bool)] = [
-            (.textField, true),
-            (.searchField, true),
+            (.field, true),
             (.button, false),
             (.checkBox, false),
             (.radioButton, false),
@@ -128,41 +144,56 @@ struct SetValueUnitTests {
     func testUIElementValidationLogic() async throws {
         // Test valid text field
         let validTextField = UIElement(
-            id: "valid-text-field",
-            role: .textField,
-            title: "Name Field",
-            value: "Current Value",
-            bounds: CGRect(x: 10, y: 20, width: 200, height: 30),
-            isEnabled: true
+            role: "Field",
+            description: "Name Field",
+            identifier: "valid-text-field",
+            roleDescription: nil,
+            help: nil,
+            position: AXUI.Point(x: 10, y: 20),
+            size: AXUI.Size(width: 200, height: 30),
+            selected: false,
+            enabled: true,
+            focused: false
         )
         
         #expect(validTextField.isEnabled, "Valid text field should be enabled")
-        #expect(validTextField.role.isTextInput, "Valid text field should support text input")
-        #expect(validTextField.bounds.width > 0, "Valid text field should have positive width")
-        #expect(validTextField.bounds.height > 0, "Valid text field should have positive height")
+        #expect(ElementRole.field.isTextInput, "Valid text field should support text input")
+        #expect((validTextField.size?.width ?? 0) > 0, "Valid text field should have positive width")
+        #expect((validTextField.size?.height ?? 0) > 0, "Valid text field should have positive height")
         
         // Test disabled text field
         let disabledTextField = UIElement(
-            id: "disabled-text-field",
-            role: .textField,
-            bounds: CGRect(x: 10, y: 20, width: 200, height: 30),
-            isEnabled: false
+            role: "Field",
+            description: "Disabled Field",
+            identifier: "disabled-text-field",
+            roleDescription: nil,
+            help: nil,
+            position: AXUI.Point(x: 10, y: 20),
+            size: AXUI.Size(width: 200, height: 30),
+            selected: false,
+            enabled: false,
+            focused: false
         )
         
         #expect(!disabledTextField.isEnabled, "Disabled text field should not be enabled")
-        #expect(disabledTextField.role.isTextInput, "Disabled text field should still be text input type")
+        #expect(ElementRole.field.isTextInput, "Disabled text field should still be text input type")
         
         // Test non-text element
         let buttonElement = UIElement(
-            id: "button-element",
-            role: .button,
-            title: "Click Me",
-            bounds: CGRect(x: 10, y: 20, width: 100, height: 30),
-            isEnabled: true
+            role: "Button",
+            description: "Click Me",
+            identifier: "button-element",
+            roleDescription: nil,
+            help: nil,
+            position: AXUI.Point(x: 10, y: 20),
+            size: AXUI.Size(width: 100, height: 30),
+            selected: false,
+            enabled: true,
+            focused: false
         )
         
         #expect(buttonElement.isEnabled, "Button should be enabled")
-        #expect(!buttonElement.role.isTextInput, "Button should not support text input")
+        #expect(!ElementRole.button.isTextInput, "Button should not support text input")
     }
     
     // MARK: - Error Type Tests
@@ -195,22 +226,35 @@ struct SetValueUnitTests {
         
         // 1. Element validation
         let validElement = UIElement(
-            id: "test-element",
-            role: .textField,
-            bounds: CGRect(x: 0, y: 0, width: 100, height: 30),
-            isEnabled: true
+            role: "Field",
+            description: "Test Field",
+            identifier: "test-element",
+            roleDescription: nil,
+            help: nil,
+            position: AXUI.Point(x: 0, y: 0),
+            size: AXUI.Size(width: 100, height: 30),
+            selected: false,
+            enabled: true,
+            focused: false
         )
         
         let invalidElement = UIElement(
-            id: "invalid-element",
-            role: .button,
-            bounds: CGRect(x: 0, y: 0, width: 100, height: 30),
-            isEnabled: true
+            role: "Button",
+            description: "Test Button",
+            identifier: "invalid-element",
+            roleDescription: nil,
+            help: nil,
+            position: AXUI.Point(x: 0, y: 0),
+            size: AXUI.Size(width: 100, height: 30),
+            selected: false,
+            enabled: true,
+            focused: false
         )
         
         // Mock validation logic
         func validateElementForSetValue(_ element: UIElement) -> Bool {
-            return element.isEnabled && (element.role.isTextInput || element.role == .checkBox || element.role == .slider)
+            guard let elementRole = ElementRole(rawValue: element.role ?? "") else { return false }
+            return element.isEnabled && (elementRole.isTextInput || elementRole == .checkBox || elementRole == .slider)
         }
         
         #expect(validateElementForSetValue(validElement), "Valid text field should pass validation")
@@ -258,23 +302,36 @@ struct SetValueUnitTests {
         // Test that setValue enforces correct types
         
         let textFieldElement = UIElement(
-            id: "text-field",
-            role: .textField,
-            bounds: CGRect.zero,
-            isEnabled: true
+            role: "Field",
+            description: "Text Field",
+            identifier: "text-field",
+            roleDescription: nil,
+            help: nil,
+            position: AXUI.Point(x: 0, y: 0),
+            size: AXUI.Size(width: 100, height: 30),
+            selected: false,
+            enabled: true,
+            focused: false
         )
         
         let buttonElement = UIElement(
-            id: "button",
-            role: .button,
-            bounds: CGRect.zero,
-            isEnabled: true
+            role: "Button",
+            description: "Button",
+            identifier: "button",
+            roleDescription: nil,
+            help: nil,
+            position: AXUI.Point(x: 0, y: 0),
+            size: AXUI.Size(width: 100, height: 30),
+            selected: false,
+            enabled: true,
+            focused: false
         )
         
         // Mock type validation
         func isValidForSetValue(element: UIElement) -> Bool {
-            let supportedRoles: Set<ElementRole> = [.textField, .searchField, .checkBox, .slider]
-            return supportedRoles.contains(element.role) && element.isEnabled
+            let supportedRoles: Set<ElementRole> = [.field, .checkBox, .slider]
+            guard let elementRole = ElementRole(rawValue: element.role ?? "") else { return false }
+            return supportedRoles.contains(elementRole) && element.isEnabled
         }
         
         #expect(isValidForSetValue(element: textFieldElement), "Text field should be valid for setValue")
@@ -285,7 +342,7 @@ struct SetValueUnitTests {
         
         for value in stringValues {
             // All string values should be acceptable
-            #expect(value is String, "All test values should be strings")
+            // All test values should be strings - this is guaranteed by the array type
             // setValue should accept any string value (no additional validation needed in unit test)
             print("setValue should accept string value: '\(value)'")
         }
@@ -298,10 +355,16 @@ struct SetValueUnitTests {
         // Test that setValue operations are fast (unit test level)
         
         let element = UIElement(
-            id: "perf-test-element",
-            role: .textField,
-            bounds: CGRect(x: 0, y: 0, width: 200, height: 30),
-            isEnabled: true
+            role: "Field",
+            description: "Performance Test",
+            identifier: "perf-test-element",
+            roleDescription: nil,
+            help: nil,
+            position: AXUI.Point(x: 0, y: 0),
+            size: AXUI.Size(width: 200, height: 30),
+            selected: false,
+            enabled: true,
+            focused: false
         )
         
         let testValues = Array(repeating: "Performance Test", count: 1000)
@@ -358,29 +421,31 @@ struct SetValueUnitTests {
         
         // 2. UIElement supports necessary properties
         let element = UIElement(
-            id: "integration-test",
-            role: .textField,
-            title: "Test Field",
-            value: "Initial",
+            role: "Field",
+            description: "Test Field",
             identifier: "test-field-id",
-            bounds: CGRect(x: 10, y: 20, width: 300, height: 40),
-            isEnabled: true
+            roleDescription: "text field",
+            help: nil,
+            position: AXUI.Point(x: 10, y: 20),
+            size: AXUI.Size(width: 300, height: 40),
+            selected: false,
+            enabled: true,
+            focused: false
         )
         
         #expect(!element.id.isEmpty, "Element should have ID")
-        #expect(element.role == .textField, "Element should have correct role")
+        #expect(element.elementRole == .field, "Element should have correct role")
         #expect(element.isEnabled, "Element should be enabled")
-        #expect(element.bounds.width > 0, "Element should have valid bounds")
+        #expect(element.cgBounds.width > 0, "Element should have valid bounds")
         
         // 3. ElementRole.isTextInput works correctly
-        #expect(ElementRole.textField.isTextInput, "textField should be text input")
-        #expect(ElementRole.searchField.isTextInput, "searchField should be text input")
+        #expect(ElementRole.field.isTextInput, "field should be text input")
         #expect(!ElementRole.button.isTextInput, "button should not be text input")
         
         // 4. Point calculation works
         let centerPoint = element.centerPoint
-        #expect(centerPoint.x == element.bounds.midX, "Center point X should be calculated correctly")
-        #expect(centerPoint.y == element.bounds.midY, "Center point Y should be calculated correctly")
+        #expect(centerPoint.x == element.cgBounds.midX, "Center point X should be calculated correctly")
+        #expect(centerPoint.y == element.cgBounds.midY, "Center point Y should be calculated correctly")
         
         // 5. ActionResult can store setValue data
         let actionResult = ActionResult(

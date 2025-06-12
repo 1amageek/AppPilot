@@ -94,7 +94,9 @@ struct TestAppIntegrationTests {
             print("🖱️ Testing accessibility-based click on: \(firstTarget.title ?? firstTarget.id)")
             
             let beforeState = await testSession.getClickTargets()
-            let beforeCount = beforeState.filter { $0.clicked }.count
+            let beforeCount = beforeState.filter { target in
+                target.clicked
+            }.count
             print("   Before click: \(beforeCount) targets clicked")
             
             let result = try await pilot.click(window: currentWindow.id, at: firstTarget.centerPoint, button: .left, count: 1)
@@ -104,7 +106,9 @@ struct TestAppIntegrationTests {
             try await pilot.wait(.time(seconds: 1.5))
             
             let afterState = await testSession.getClickTargets()
-            let afterCount = afterState.filter { $0.clicked }.count
+            let afterCount = afterState.filter { target in
+                target.clicked
+            }.count
             print("   After click: \(afterCount) targets clicked")
             
             if afterCount > beforeCount {
@@ -116,7 +120,9 @@ struct TestAppIntegrationTests {
                 try await Task.sleep(nanoseconds: 800_000_000) // 800ms standard wait
                 
                 let retryState = await testSession.getClickTargets()
-                let retryCount = retryState.filter { $0.clicked }.count
+                let retryCount = retryState.filter { target in
+                    target.clicked
+                }.count
                 
                 if retryCount > beforeCount {
                     testResult = (true, "Click detected after retry")
@@ -165,7 +171,9 @@ struct TestAppIntegrationTests {
         let allElements = try await pilot.findElements(in: testSession.window.id)
         
         print("📋 All UI elements discovered (\(allElements.count) total):")
-        let elementsByRole = Dictionary(grouping: allElements) { $0.role }
+        let elementsByRole = Dictionary(grouping: allElements) { element in
+            element.elementRole
+        }
         for (role, elements) in elementsByRole.sorted(by: { $0.key.rawValue < $1.key.rawValue }) {
             print("   \(role.rawValue): \(elements.count)")
         }
@@ -209,7 +217,9 @@ struct TestAppIntegrationTests {
             print("\n🎯 Testing target \(index + 1) at (\(target.centerPoint.x), \(target.centerPoint.y))")
             
             let beforeState = await testSession.getClickTargets()
-            let beforeCount = beforeState.filter { $0.clicked }.count
+            let beforeCount = beforeState.filter { target in
+                target.clicked
+            }.count
             
             let result = try await pilot.click(window: testSession.window.id, at: target.centerPoint)
             #expect(result.success, "Click should succeed on target \(index + 1)")
@@ -272,7 +282,9 @@ struct TestAppIntegrationTests {
         let allElements = try await pilot.findElements(in: testSession.window.id)
         
         // Categorize elements by role
-        let elementsByRole = Dictionary(grouping: allElements) { $0.role }
+        let elementsByRole = Dictionary(grouping: allElements) { element in
+            element.elementRole
+        }
         print("📂 Element breakdown by role:")
         for (role, elements) in elementsByRole.sorted(by: { $0.key.rawValue < $1.key.rawValue }) {
             print("   \(role.rawValue): \(elements.count) elements")
@@ -280,8 +292,8 @@ struct TestAppIntegrationTests {
         
         // Focus on interactive elements
         let interactiveElements = allElements.filter { element in
-            [.button, .radioButton, .textField, .checkBox].contains(element.role) &&
-            element.isEnabled && element.bounds.width > 10 && element.bounds.height > 10
+            [.button, .radioButton, .field, .checkBox].contains(element.elementRole) &&
+            element.isEnabled && element.cgBounds.width > 10 && element.cgBounds.height > 10
         }
         
         print("🎮 Found \(interactiveElements.count) interactive elements")
@@ -293,11 +305,11 @@ struct TestAppIntegrationTests {
         var coordinateData: [(element: UIElement, centerX: CGFloat, centerY: CGFloat)] = []
         
         for element in interactiveElements {
-            let centerX = element.bounds.midX
-            let centerY = element.bounds.midY
+            let centerX = element.cgBounds.midX
+            let centerY = element.cgBounds.midY
             coordinateData.append((element, centerX, centerY))
             
-            print("🔍 Element: \(element.role.rawValue) at center (\(centerX), \(centerY)), bounds: \(element.bounds)")
+            print("🔍 Element: \(element.elementRole.rawValue) at center (\(centerX), \(centerY)), bounds: \(element.cgBounds)")
         }
         
         // Stage 3: アクション (Action) - Validate coordinate-based clicking
@@ -314,10 +326,12 @@ struct TestAppIntegrationTests {
         for (element, centerX, centerY) in coordinateData.prefix(3) { // Test first 3 elements
             discoveredClickTests += 1
             
-            print("\n🎯 Testing UI tree coordinate (\(centerX), \(centerY)) for \(element.role.rawValue)")
+            print("\n🎯 Testing UI tree coordinate (\(centerX), \(centerY)) for \(element.elementRole.rawValue)")
             
             let beforeState = await testSession.getClickTargets()
-            let beforeCount = beforeState.filter { $0.clicked }.count
+            let beforeCount = beforeState.filter { target in
+                target.clicked
+            }.count
             
             let point = Point(x: centerX, y: centerY)
             let result = try await pilot.click(window: testSession.window.id, at: point)
@@ -326,7 +340,9 @@ struct TestAppIntegrationTests {
             try await Task.sleep(nanoseconds: 800_000_000) // 800ms standard wait
             
             let afterState = await testSession.getClickTargets()
-            let afterCount = afterState.filter { $0.clicked }.count
+            let afterCount = afterState.filter { target in
+                target.clicked
+            }.count
             
             if result.success && afterCount > beforeCount {
                 print("   ✅ UI tree coordinate click successful")
@@ -371,7 +387,9 @@ struct TestAppIntegrationTests {
         // Stage 1: 見る (See/Observe) - Find text fields
         print("\n👁️ Stage 1: 見る (Discover Text Fields)")
         let allElements = try await pilot.findElements(in: testSession.window.id)
-        let textFields = allElements.filter { $0.role == .textField }
+        let textFields = allElements.filter { element in
+            element.elementRole == .field
+        }
         
         print("🔍 Found \(textFields.count) text fields:")
         for (index, field) in textFields.enumerated() {
@@ -474,7 +492,9 @@ struct TestAppIntegrationTests {
         
         // Find text field
         let allElements = try await pilot.findElements(in: testSession.window.id)
-        let textFields = allElements.filter { $0.role == .textField && $0.isEnabled }
+        let textFields = allElements.filter { element in
+            element.elementRole == .field && element.isEnabled
+        }
         
         guard let targetField = textFields.first else {
             throw TestSessionError.noTargetsFound
@@ -582,9 +602,9 @@ struct TestAppIntegrationTests {
             print("🧭 Need to navigate to Keyboard tab...")
             
             let sidebarCells = allElements.filter { element in
-                element.role == .cell && 
-                element.bounds.width > 200 && 
-                element.bounds.height > 40 &&
+                element.elementRole == .cell && 
+                element.cgBounds.width > 200 && 
+                element.cgBounds.height > 40 &&
                 element.centerPoint.x < 650
             }
             
@@ -614,12 +634,12 @@ struct TestAppIntegrationTests {
         let updatedElements = try await pilot.findElements(in: testSession.window.id)
         
         let textFields = updatedElements.filter { element in
-            element.role == .textField
+            element.elementRole == .field
         }
         
         print("🔍 Found \(textFields.count) text fields")
         for (index, field) in textFields.enumerated() {
-            print("   TextField \(index + 1): enabled=\(field.isEnabled) bounds=\(field.bounds)")
+            print("   TextField \(index + 1): enabled=\(field.isEnabled) bounds=\(field.cgBounds)")
         }
         
         // For simplified keyboard test, look for the "Expected Text" field first
@@ -651,7 +671,7 @@ struct TestAppIntegrationTests {
         print("2️⃣ Starting the test...")
         let buttonElements = try await pilot.findElements(in: testSession.window.id)
         let startButton = buttonElements.first { element in
-            element.role == ElementRole.button && 
+            element.elementRole == ElementRole.button && 
             (element.title?.contains("Start Test") ?? false)
         }
         
@@ -681,7 +701,9 @@ struct TestAppIntegrationTests {
         
         // Check if test auto-completed (simplified KeyboardTestView has auto-completion)
         let finalElements = try await pilot.findElements(in: testSession.window.id)
-        let finalTextFields = finalElements.filter { $0.role == .textField }
+        let finalTextFields = finalElements.filter { element in
+            element.elementRole == .field
+        }
         
         var inputDetected = false
         if finalTextFields.count >= 2 {
@@ -914,9 +936,15 @@ struct TestAppIntegrationTests {
         let allElements = try await pilot.findElements(in: mainWindow.id)
         print("🔍 Discovered \(allElements.count) UI elements")
         
-        let buttons = allElements.filter { $0.role == .button }
-        let textFields = allElements.filter { $0.role == .textField }
-        let radioButtons = allElements.filter { $0.role == .radioButton }
+        let buttons = allElements.filter { element in
+            element.elementRole == .button
+        }
+        let textFields = allElements.filter { element in
+            element.elementRole == .field
+        }
+        let radioButtons = allElements.filter { element in
+            element.elementRole == .radioButton
+        }
         
         print("📊 Element breakdown:")
         print("   Buttons: \(buttons.count)")
@@ -1070,7 +1098,7 @@ struct TestAppIntegrationTests {
         // Perform some clicks to change state
         let allElements = try await pilot.findElements(in: testSession1.window.id)
         let clickTargets = allElements.filter { element in
-            element.role == .radioButton && 
+            element.elementRole == .radioButton && 
             element.centerPoint.y > 290 && element.centerPoint.y < 295 &&
             element.centerPoint.x > 700
         }
@@ -1081,7 +1109,9 @@ struct TestAppIntegrationTests {
             try await Task.sleep(nanoseconds: 800_000_000) // 800ms standard wait
             
             let afterClickTargets = await testSession1.getClickTargets()
-            let clickedCount = afterClickTargets.filter { $0.clicked }.count
+            let clickedCount = afterClickTargets.filter { target in
+            target.clicked
+        }.count
             print("📊 After click: \(clickedCount) targets clicked")
         }
         
@@ -1091,7 +1121,9 @@ struct TestAppIntegrationTests {
         try await Task.sleep(nanoseconds: 800_000_000) // 800ms standard wait
         
         let resetTargets = await testSession1.getClickTargets()
-        let resetClickedCount = resetTargets.filter { $0.clicked }.count
+        let resetClickedCount = resetTargets.filter { target in
+            target.clicked
+        }.count
         print("📊 After reset: \(resetClickedCount) targets clicked")
         
         #expect(resetClickedCount == 0, "All targets should be unclicked after reset")
@@ -1108,7 +1140,9 @@ struct TestAppIntegrationTests {
         let testSession2 = try await TestSession.create(pilot: pilot, testType: .mouseClick)
         try await testSession2.navigateToTab()
         let session2Targets = await testSession2.getClickTargets()
-        let session2ClickedCount = session2Targets.filter { $0.clicked }.count
+        let session2ClickedCount = session2Targets.filter { target in
+            target.clicked
+        }.count
         
         print("📊 New session targets: \(session2ClickedCount) clicked")
         #expect(session2ClickedCount == 0, "New session should start with clean state")
@@ -1366,7 +1400,7 @@ struct TestAppIntegrationTests {
         let targetsByIdentifier = elements.filter { element in
             guard let identifier = element.identifier else { return false }
             return identifier.hasPrefix("click_target_") && 
-                   (element.role == .button || element.role == .group || element.role == .unknown)
+                   (element.elementRole == .button || element.elementRole == .group || element.elementRole == .unknown)
         }
         
         if !targetsByIdentifier.isEmpty {
@@ -1378,7 +1412,7 @@ struct TestAppIntegrationTests {
         let targetsByLabel = elements.filter { element in
             guard let title = element.title else { return false }
             return title.contains("Click target") && 
-                   (element.role == .button || element.role == .group || element.role == .unknown)
+                   (element.elementRole == .button || element.elementRole == .group || element.elementRole == .unknown)
         }
         
         if !targetsByLabel.isEmpty {
@@ -1391,14 +1425,14 @@ struct TestAppIntegrationTests {
             let isInTestArea = element.centerPoint.x > 600 && element.centerPoint.x < 1200 &&
                               element.centerPoint.y > 100 && element.centerPoint.y < 600
             
-            let isInteractive = element.role == .button || 
-                               element.role == .group || 
-                               element.role == .unknown ||
-                               element.role == .radioButton ||
+            let isInteractive = element.elementRole == .button || 
+                               element.elementRole == .group || 
+                               element.elementRole == .unknown ||
+                               element.elementRole == .radioButton ||
                                element.isEnabled
             
-            let hasReasonableSize = element.bounds.width > 50 && element.bounds.width < 200 &&
-                                   element.bounds.height > 50 && element.bounds.height < 200
+            let hasReasonableSize = element.cgBounds.width > 50 && element.cgBounds.width < 200 &&
+                                   element.cgBounds.height > 50 && element.cgBounds.height < 200
             
             return isInTestArea && isInteractive && hasReasonableSize
         }
@@ -1419,12 +1453,12 @@ struct TestAppIntegrationTests {
         
         let potentialClickTargets = elements.filter { element in
             let isInRightArea = element.centerPoint.x > (currentWindow.bounds.minX + 400)
-            let hasReasonableSize = element.bounds.width > 50 && element.bounds.width < 200 &&
-                                   element.bounds.height > 50 && element.bounds.height < 200
-            let isClickable = element.role == ElementRole.button || 
-                             element.role == ElementRole.group || 
-                             element.role == ElementRole.unknown ||
-                             element.role == ElementRole.radioButton
+            let hasReasonableSize = element.cgBounds.width > 50 && element.cgBounds.width < 200 &&
+                                   element.cgBounds.height > 50 && element.cgBounds.height < 200
+            let isClickable = element.elementRole == ElementRole.button || 
+                             element.elementRole == ElementRole.group || 
+                             element.elementRole == ElementRole.unknown ||
+                             element.elementRole == ElementRole.radioButton
             
             return isInRightArea && hasReasonableSize && isClickable
         }
@@ -1433,17 +1467,21 @@ struct TestAppIntegrationTests {
         
         if let firstTarget = potentialClickTargets.first {
             print("🖱️ Testing click on discovered UI element...")
-            print("   Element: \(firstTarget.role.rawValue) at (\(firstTarget.centerPoint.x), \(firstTarget.centerPoint.y))")
+            print("   Element: \(firstTarget.elementRole.rawValue) at (\(firstTarget.centerPoint.x), \(firstTarget.centerPoint.y))")
             
             let beforeState = await testSession.getClickTargets()
-            let beforeCount = beforeState.filter { $0.clicked }.count
+            let beforeCount = beforeState.filter { target in
+                target.clicked
+            }.count
             
             let _ = try await pilot.click(window: currentWindow.id, at: firstTarget.centerPoint, button: .left, count: 1)
             
             try await pilot.wait(.time(seconds: 1.5))
             
             let afterState = await testSession.getClickTargets()
-            let afterCount = afterState.filter { $0.clicked }.count
+            let afterCount = afterState.filter { target in
+                target.clicked
+            }.count
             
             if afterCount > beforeCount {
                 return (true, "UI element click successful")

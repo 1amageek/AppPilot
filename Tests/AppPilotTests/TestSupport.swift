@@ -173,8 +173,12 @@ actor TestSession {
         
         // Debug: List all elements to understand the structure
         let allElements = try await pilot.findElements(in: window.id)
-        let imageElements = allElements.filter { $0.role == .image }
-        let rowElements = allElements.filter { $0.role == .row }
+        let imageElements = allElements.filter { element in
+            element.elementRole == .image
+        }
+        let rowElements = allElements.filter { element in
+            element.elementRole == .row
+        }
         
         print("🔍 Found \(imageElements.count) image elements:")
         for img in imageElements {
@@ -183,7 +187,8 @@ actor TestSession {
         
         print("🔍 Found \(rowElements.count) row elements:")
         for row in rowElements {
-            print("   - Row: bounds=(\(String(format: "%.0f", row.bounds.minX)), \(String(format: "%.0f", row.bounds.minY)), \(String(format: "%.0f", row.bounds.width))x\(String(format: "%.0f", row.bounds.height)))")
+            let bounds = row.cgBounds
+            print("   - Row: bounds=(\(String(format: "%.0f", bounds.minX)), \(String(format: "%.0f", bounds.minY)), \(String(format: "%.0f", bounds.width))x\(String(format: "%.0f", bounds.height)))")
         }
         
         // Strategy 1: Find the target image by identifier
@@ -204,11 +209,16 @@ actor TestSession {
             for row in rowElements {
                 // Get all elements within this row's bounds
                 let elementsInRow = allElements.filter { element in
-                    row.bounds.contains(CGPoint(x: element.centerPoint.x, y: element.centerPoint.y))
+                    row.cgBounds.contains(CGPoint(x: element.centerPoint.x, y: element.centerPoint.y))
                 }
                 
                 // Check if any image in this row has our target identifier
-                let hasTargetImage = elementsInRow.filter { $0.role == .image }.contains { $0.identifier == imageIdentifier }
+                let imagesInRow = elementsInRow.filter { element in
+                    element.elementRole == ElementRole.image
+                }
+                let hasTargetImage = imagesInRow.contains { element in
+                    element.identifier == imageIdentifier
+                }
                 
                 if hasTargetImage {
                     print("🎯 Found row containing target image, clicking row instead")
@@ -243,7 +253,7 @@ actor TestSession {
                 
                 for row in rowElements {
                     // Check if the image is within this row's bounds
-                    if row.bounds.contains(CGPoint(x: icon.centerPoint.x, y: icon.centerPoint.y)) {
+                    if row.cgBounds.contains(CGPoint(x: icon.centerPoint.x, y: icon.centerPoint.y)) {
                         print("🎯 Found parent row, clicking row as fallback")
                         do {
                             let result = try await pilot.click(element: row)

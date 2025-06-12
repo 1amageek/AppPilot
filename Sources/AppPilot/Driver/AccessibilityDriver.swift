@@ -14,16 +14,15 @@ public protocol AccessibilityDriver: Sendable {
     func findWindow(app: AppHandle, title: String) async throws -> WindowHandle?
     func findWindow(app: AppHandle, index: Int) async throws -> WindowHandle?
     
-    // UI Element Discovery
+    // UI Element Discovery (ID-based)
     func findElements(in window: WindowHandle, role: ElementRole?, title: String?, identifier: String?) async throws -> [UIElement]
     func findElement(in window: WindowHandle, role: ElementRole, title: String?, identifier: String?) async throws -> UIElement
-    func elementExists(_ element: UIElement) async throws -> Bool
-    func getValue(from element: UIElement) async throws -> String?
-    func setValue(_ value: String, for element: UIElement) async throws
+    func elementExists(with id: String) async throws -> Bool
+    func value(for id: String) async throws -> String?
+    func setValue(_ value: String, for id: String) async throws
     
     // Cache Management
     func clearElementCache(for window: WindowHandle?) async
-    
     
     // Event Monitoring
     func observeEvents(for window: WindowHandle, mask: AXMask) async -> AsyncStream<AXEvent>
@@ -37,7 +36,7 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
     private var handleCounter = 0
     private var appHandles: [String: AppHandleData] = [:]
     private var windowHandles: [String: WindowHandleData] = [:]
-    private var elementRefs: [String: AXUIElement] = [:]  // Store AXUIElement references for live operations
+    // Element caching is now handled by AXUI's ID system
     
     private struct AppHandleData {
         let handle: AppHandle
@@ -376,27 +375,37 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
     }
     
     
-    // MARK: - Element Value Operations
+    // MARK: - Element Value Operations (ID-based)
     
     public func getValue(from element: UIElement) async throws -> String? {
-        // Use cached AXUIElement if available
-        if let axElementRef = elementRefs[element.id] {
-            return getStringAttribute(from: axElementRef, attribute: kAXValueAttribute)
+        return try await value(for: element.id)
+    }
+    
+    public func value(for id: String) async throws -> String? {
+        // Find element by ID using AXUI
+        guard let element = try await findElementById(id) else {
+            throw PilotError.elementNotAccessible(id)
         }
         
-        // Fallback to live element search
-        let axElement = try await findLiveAXElement(for: element)
-        return getStringAttribute(from: axElement, attribute: kAXValueAttribute)
+        // Return value from AXElement
+        return element.description
     }
     
     public func setValue(_ value: String, for element: UIElement) async throws {
-        // Use cached AXUIElement if available
-        let axElement: AXUIElement
-        if let cachedElement = elementRefs[element.id] {
-            axElement = cachedElement
-        } else {
-            axElement = try await findLiveAXElement(for: element)
+        try await setValue(value, for: element.id)
+    }
+    
+    public func setValue(_ value: String, for id: String) async throws {
+        // setValue operation requires access to native AXUIElement
+        // Since AXUI's axElementRef is internal, we need to re-search for the element
+        // using the traditional AX tree traversal approach for live operations
+        
+        guard let element = try await findElementById(id) else {
+            throw PilotError.elementNotAccessible(id)
         }
+        
+        // Find the live AXUIElement for this element by searching all windows
+        let axElement = try await findLiveAXElementForId(id, element: element)
         
         // Direct value setting using AXUIElement reference
         let result = AXUIElementSetAttributeValue(axElement, kAXValueAttribute as CFString, value as CFString)
@@ -405,9 +414,9 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
         case .success:
             return
         case .invalidUIElement:
-            throw PilotError.elementNotAccessible(element.id)
+            throw PilotError.elementNotAccessible(id)
         case .attributeUnsupported:
-            throw PilotError.invalidArgument("Element \(element.role.rawValue) does not support value setting")
+            throw PilotError.invalidArgument("Element does not support value setting")
         case .cannotComplete:
             throw PilotError.osFailure(api: "AXUIElementSetAttributeValue", code: Int32(result.rawValue))
         case .notImplemented:
@@ -422,21 +431,12 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
     }
     
     public func elementExists(_ element: UIElement) async throws -> Bool {
-        // Use cached AXUIElement if available
-        if let axElementRef = elementRefs[element.id] {
-            // Direct AXUIElement reference validation (fast)
-            var value: CFTypeRef?
-            let result = AXUIElementCopyAttributeValue(axElementRef, kAXRoleAttribute as CFString, &value)
-            return result == .success
-        }
-        
-        // Fallback to element search if not cached
-        do {
-            let _ = try await findLiveAXElement(for: element)
-            return true
-        } catch {
-            return false
-        }
+        return try await elementExists(with: element.id)
+    }
+    
+    public func elementExists(with id: String) async throws -> Bool {
+        // Use AXUI to check if element exists by ID
+        return (try await findElementById(id)) != nil
     }
     
     // MARK: - Helper Methods for Improved Element Discovery
@@ -448,41 +448,19 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
     }
     
     private func createUIElementFromAXElement(_ axElement: AXElement, windowHandle: WindowHandle) -> UIElement? {
-        guard let roleString = axElement.role else { return nil }
+        guard let _ = axElement.role else { return nil }
         
-        let role = ElementRole(rawValue: roleString) ?? .unknown
-        let title = axElement.description  // AXUI uses 'description' for display text
-        let identifier = axElement.identifier
-        let isEnabled = axElement.state?.enabled ?? true
-        
-        // Create bounds from position and size
-        let bounds: CGRect
-        if let position = axElement.position, let size = axElement.size {
-            bounds = CGRect(origin: CGPoint(x: position.x, y: position.y), size: CGSize(width: size.width, height: size.height))
-        } else {
-            bounds = CGRect.zero
-        }
-        
-        // Generate consistent ID based on element properties
-        let elementId = String.consistentID(from: roleString, title: title, identifier: identifier, bounds: bounds)
-        
-        return UIElement(
-            id: elementId,
-            role: role,
-            title: title,
-            value: axElement.description,
-            identifier: identifier,
-            bounds: bounds,
-            isEnabled: isEnabled
-        )
+        // Return the AXElement directly (since UIElement is aliased to AXElement)
+        // Note: We can't access axElementRef directly as it's internal in AXUI
+        return axElement
     }
     
     private func filterElementsWithANDLogic(_ elements: [UIElement], role: ElementRole?, title: String?, identifier: String?) -> [UIElement] {
         return elements.filter { element in
             // AND logic: all specified criteria must match
             
-            // Role matching
-            if let role = role, element.role != role {
+            // Role matching - compare against AXElement's role string
+            if let role = role, element.role != role.rawValue {
                 return false
             }
             
@@ -499,10 +477,11 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
                 return false
             }
             
-            // Additional quality filters
+            // Additional quality filters using AXElement properties
+            let bounds = element.cgBounds
             return element.isEnabled &&
-                   element.bounds.width > 0 &&
-                   element.bounds.height > 0
+                   bounds.width > 0 &&
+                   bounds.height > 0
         }
     }
     
@@ -520,7 +499,8 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
             if !identifierMatches.isEmpty {
                 // If multiple identifier matches, prefer enabled and visible ones
                 let qualityMatches = identifierMatches.filter { element in
-                    element.isEnabled && element.bounds.width > 0 && element.bounds.height > 0
+                    let bounds = element.cgBounds
+                    return element.isEnabled && bounds.width > 0 && bounds.height > 0
                 }
                 return qualityMatches.isEmpty ? identifierMatches[0] : qualityMatches[0]
             }
@@ -539,7 +519,8 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
             if !exactTitleMatches.isEmpty {
                 // If multiple exact title matches, prefer enabled and visible ones
                 let qualityMatches = exactTitleMatches.filter { element in
-                    element.isEnabled && element.bounds.width > 0 && element.bounds.height > 0
+                    let bounds = element.cgBounds
+                    return element.isEnabled && bounds.width > 0 && bounds.height > 0
                 }
                 return qualityMatches.isEmpty ? exactTitleMatches[0] : qualityMatches[0]
             }
@@ -547,7 +528,8 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
         
         // 3. Fallback: prefer enabled and visible elements
         let qualityMatches = elements.filter { element in
-            element.isEnabled && element.bounds.width > 0 && element.bounds.height > 0
+            let bounds = element.cgBounds
+            return element.isEnabled && bounds.width > 0 && bounds.height > 0
         }
         
         if !qualityMatches.isEmpty {
@@ -558,34 +540,69 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
         return elements[0]
     }
     
-    private func findLiveAXElement(for element: UIElement) async throws -> AXUIElement {
-        // Parse element ID to get window information
-        let components = element.id.components(separatedBy: "_")
-        guard components.count >= 3 else {
-            throw PilotError.elementNotAccessible(element.id)
+    // MARK: - ID-based Element Lookup
+    
+    private func findElementById(_ elementId: String) async throws -> AXElement? {
+        // Search through all applications and windows to find element with matching ID
+        for (_, windowData) in windowHandles {
+            do {
+                let bundleId = appHandles[windowData.appHandle.id]?.app.bundleIdentifier ?? ""
+                let windowIndex = try await getWindowIndex(for: windowData.handle)
+                
+                // Use AXUI to dump elements and find by ID
+                let elements = try AXDumper.dumpWindow(
+                    bundleIdentifier: bundleId,
+                    windowIndex: windowIndex,
+                    includeZeroSize: false
+                )
+                
+                // Find element with matching ID
+                if let element = elements.first(where: { $0.id == elementId }) {
+                    return element
+                }
+            } catch {
+                // Continue searching in other windows
+                continue
+            }
         }
         
-        let windowId = components[0] + "_" + components[1]
-        guard let windowData = windowHandles[windowId] else {
-            throw PilotError.windowNotFound(WindowHandle(id: windowId))
-        }
-        
-        // Find the element by traversing the AX tree based on its properties
-        let axElement = try await findElementInAXTree(windowData.axWindow, targetElement: element)
-        
-        // Cache the found element for future use
-        elementRefs[element.id] = axElement
-        
-        return axElement
+        return nil
     }
     
-    private func findElementInAXTree(_ rootAXElement: AXUIElement, targetElement: UIElement, depth: Int = 0, maxDepth: Int = 10) async throws -> AXUIElement {
+    private func getWindowIndex(for windowHandle: WindowHandle) async throws -> Int {
+        guard let windowData = windowHandles[windowHandle.id],
+              let _ = appHandles[windowData.appHandle.id] else {
+            throw PilotError.windowNotFound(windowHandle)
+        }
+        
+        let windows = try await getWindows(for: windowData.appHandle)
+        guard let index = windows.firstIndex(where: { $0.id == windowHandle }) else {
+            throw PilotError.windowNotFound(windowHandle)
+        }
+        
+        return index
+    }
+    
+    /// Find live AXUIElement for an element ID by searching AX tree
+    private func findLiveAXElementForId(_ id: String, element: AXElement) async throws -> AXUIElement {
+        // Search through all windows to find a live AXUIElement matching the element properties
+        for (_, windowData) in windowHandles {
+            if let foundElement = try? await findElementInAXTree(windowData.axWindow, targetElement: element) {
+                return foundElement
+            }
+        }
+        
+        throw PilotError.elementNotAccessible(id)
+    }
+    
+    /// Search AX tree for an element matching the target AXElement
+    private func findElementInAXTree(_ rootAXElement: AXUIElement, targetElement: AXElement, depth: Int = 0, maxDepth: Int = 10) async throws -> AXUIElement {
         guard depth < maxDepth else {
             throw PilotError.elementNotAccessible(targetElement.id)
         }
         
-        // Check if current element matches
-        if elementMatches(rootAXElement, target: targetElement) {
+        // Check if current element matches the target element
+        if axElementMatches(rootAXElement, target: targetElement) {
             return rootAXElement
         }
         
@@ -604,32 +621,45 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
         throw PilotError.elementNotAccessible(targetElement.id)
     }
     
-    private func elementMatches(_ axElement: AXUIElement, target: UIElement) -> Bool {
+    /// Check if AXUIElement matches target AXElement
+    private func axElementMatches(_ axElement: AXUIElement, target: AXElement) -> Bool {
         let role = getStringAttribute(from: axElement, attribute: kAXRoleAttribute)
-        let title = getStringAttribute(from: axElement, attribute: kAXTitleAttribute)
-        let value = getStringAttribute(from: axElement, attribute: kAXValueAttribute)
+        let description = getStringAttribute(from: axElement, attribute: kAXDescriptionAttribute)
         let identifier = getStringAttribute(from: axElement, attribute: kAXIdentifierAttribute)
+        let position = getPositionAttribute(from: axElement)
+        let size = getSizeAttribute(from: axElement)
         
-        // Match based on role and at least one other property
-        return role == target.role.rawValue &&
-               ((title == target.title && title != nil) ||
-                (value == target.value && value != nil) ||
-                (identifier == target.identifier && identifier != nil))
+        // Match based on role, identifier, and position/size
+        let roleMatches = role == target.role
+        let identifierMatches = identifier == target.identifier
+        let descriptionMatches = description == target.description
+        
+        // Position/size matching with small tolerance
+        let positionMatches: Bool = {
+            guard let pos = position, let targetPos = target.position else { 
+                return position == nil && target.position == nil 
+            }
+            return abs(pos.x - targetPos.x) < 2 && abs(pos.y - targetPos.y) < 2
+        }()
+        
+        let sizeMatches: Bool = {
+            guard let sz = size, let targetSz = target.size else { 
+                return size == nil && target.size == nil 
+            }
+            return abs(sz.width - targetSz.width) < 2 && abs(sz.height - targetSz.height) < 2
+        }()
+        
+        // Element matches if role and identifier match and at least one other property matches
+        return roleMatches && identifierMatches && (descriptionMatches || (positionMatches && sizeMatches))
     }
     
     
     // MARK: - Cache Management
     
     public func clearElementCache(for window: WindowHandle?) async {
-        // Clear element references for specified window or all windows
-        if let window = window {
-            let keysToRemove = elementRefs.keys.filter { $0.hasPrefix(window.id) }
-            for key in keysToRemove {
-                elementRefs.removeValue(forKey: key)
-            }
-        } else {
-            elementRefs.removeAll()
-        }
+        // Element caching is now handled by AXUI internally
+        // This method is kept for API compatibility but does nothing
+        // AXUI manages element lifecycle through its ID system
     }
     
     

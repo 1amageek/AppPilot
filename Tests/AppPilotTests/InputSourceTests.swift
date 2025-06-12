@@ -205,7 +205,7 @@ struct InputSourceTests {
         
         // Find text fields in the keyboard tab
         let elements = try await pilot.findElements(in: testSession.window.id)
-        let textFields = elements.filter { $0.role == .textField }
+        let textFields = elements.filter { $0.elementRole == .field }
         
         print("🔍 Found \(textFields.count) text fields")
         for (index, field) in textFields.enumerated() {
@@ -219,15 +219,19 @@ struct InputSourceTests {
         var textField: UIElement?
         
         // Strategy 1: Find main input field (right panel, enabled)
-        textField = textFields.first { field in
+        if let foundField = textFields.first(where: { field in
             field.isEnabled && 
             field.centerPoint.x > 600 && // Right panel
-            field.bounds.width > 100      // Reasonable size
+            field.cgBounds.width > 100      // Reasonable size
+        }) {
+            textField = foundField
+        } else {
+            textField = textFields.first
         }
         
         // Strategy 2: Find any enabled field
         if textField == nil {
-            textField = textFields.first { $0.isEnabled }
+            textField = textFields.first(where: { $0.isEnabled })
         }
         
         // Strategy 3: Use first available field
@@ -356,7 +360,7 @@ struct InputSourceTests {
         testSession: TestSession
     ) async throws {
         print("\nPerforming Input Source Test")
-        print("Element: \(element.role.rawValue) at (\(element.centerPoint.x), \(element.centerPoint.y))")
+        print("Element: \(element.elementRole.displayName) at (\(element.centerPoint.x), \(element.centerPoint.y))")
         
         // Focus on the text field
         print("🖱️ Focusing on text field...")
@@ -379,9 +383,9 @@ struct InputSourceTests {
             print("\n\(index + 1)️⃣ Testing \(test.description)")
             
             // Clear existing content
-            if element.role == .textField {
+            if element.elementRole == .field {
                 print("Clearing field...")
-                try await pilot.setValue("", for: element)
+                _ = try await pilot.setValue("", for: element)
                 try await Task.sleep(nanoseconds: 500_000_000) // 500ms
             }
             

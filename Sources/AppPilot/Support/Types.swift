@@ -1,5 +1,6 @@
 import Foundation
 import CoreGraphics
+import AXUI
 
 // MARK: - Core Identifiers
 
@@ -149,11 +150,11 @@ public enum MouseButton: Sendable {
     }
 }
 
-// MARK: - UI Element System
+// MARK: - UI Element System (AXUI Integration)
 
-/// A UI element discovered through the Accessibility API
+/// Re-export AXElement from AXUI for AppPilot compatibility
 /// 
-/// `UIElement` represents a user interface element (button, text field, etc.) that can be
+/// `AXElement` represents a user interface element (button, text field, etc.) that can be
 /// automated. Elements are discovered using the Accessibility API and contain information
 /// about their role, position, and properties.
 /// 
@@ -161,108 +162,63 @@ public enum MouseButton: Sendable {
 /// let button = try await pilot.findButton(in: window, title: "Submit")
 /// try await pilot.click(element: button)
 /// ```
-public struct UIElement: Sendable, Codable {
-    /// Unique identifier for this element
-    public let id: String
-    /// The accessibility role of this element (button, text field, etc.)
-    public let role: ElementRole
-    /// The title or label text of this element
-    public let title: String?
-    /// The current value of this element (text content, checkbox state, etc.)
-    public let value: String?
-    /// The accessibility identifier assigned to this element
-    public let identifier: String?
-    /// The screen bounds of this element
-    public let bounds: CGRect
-    /// Whether this element is currently enabled for interaction
-    public let isEnabled: Bool
-    
-    /// The center point of this element in screen coordinates
-    /// 
-    /// This computed property automatically calculates the center point from the element's bounds,
-    /// which is useful for click operations.
-    public var centerPoint: Point {
-        Point(x: bounds.midX, y: bounds.midY)
-    }
-    
-    public init(
-        id: String,
-        role: ElementRole,
-        title: String? = nil,
-        value: String? = nil,
-        identifier: String? = nil,
-        bounds: CGRect,
-        isEnabled: Bool = true
-    ) {
-        self.id = id
-        self.role = role
-        self.title = title
-        self.value = value
-        self.identifier = identifier
-        self.bounds = bounds
-        self.isEnabled = isEnabled
-    }
-}
+public typealias UIElement = AXElement
 
 /// UI element roles from the Accessibility API
 /// 
 /// `ElementRole` represents the different types of UI elements that can be discovered
-/// and automated. These correspond to standard accessibility roles.
+/// and automated. These correspond to AXUI's normalized accessibility roles.
 /// 
 /// ```swift
 /// // Find all buttons in a window
 /// let buttons = try await pilot.findElements(in: window, role: .button)
 /// 
 /// // Find text input fields
-/// let textFields = try await pilot.findElements(in: window, role: .textField)
+/// let textFields = try await pilot.findElements(in: window, role: .field)
 /// ```
 public enum ElementRole: String, Sendable, CaseIterable, Codable {
     /// A clickable button element
-    case button = "AXButton"
-    /// A text input field
-    case textField = "AXTextField"
-    /// A search input field
-    case searchField = "AXSearchField"
-    /// A generic input field
-    case field = "AXField"
+    case button = "Button"
+    /// A text input field (includes textField, searchField, and field types)
+    case field = "Field"
     /// A menu item
-    case menuItem = "AXMenuItem"
+    case menuItem = "MenuItem"
     /// A menu bar container
-    case menuBar = "AXMenuBar"
+    case menuBar = "MenuBar"
     /// A menu bar item
-    case menuBarItem = "AXMenuBarItem"
+    case menuBarItem = "MenuBarItem"
     /// A checkbox element
-    case checkBox = "AXCheckBox"
+    case checkBox = "Check"
     /// A radio button element
-    case radioButton = "AXRadioButton"
+    case radioButton = "Radio"
     /// A clickable link
-    case link = "AXLink"
+    case link = "Link"
     /// A tab in a tab control
-    case tab = "AXTab"
+    case tab = "Tab"
     /// A window element
-    case window = "AXWindow"
+    case window = "Window"
     /// Static text that cannot be edited
-    case staticText = "AXStaticText"
+    case staticText = "Text"
     /// A grouping container element
-    case group = "AXGroup"
+    case group = "Group"
     /// A scrollable area
-    case scrollArea = "AXScrollArea"
+    case scrollArea = "Scroll"
     /// An image element
-    case image = "AXImage"
+    case image = "Image"
     /// A list container
-    case list = "AXList"
+    case list = "List"
     /// A table element
-    case table = "AXTable"
+    case table = "Table"
     /// A table cell
-    case cell = "AXCell"
+    case cell = "Cell"
     /// A popup button/dropdown
-    case popUpButton = "AXPopUpButton"
+    case popUpButton = "PopUp"
     /// A slider control
-    case slider = "AXSlider"
+    case slider = "Slider"
     /// A row in a list or outline
-    case row = "AXRow"
+    case row = "Row"
     /// An unknown or unsupported element type
-    case unknown = "AXUnknown"
+    case unknown = "Unknown"
     
     /// Whether this element type can typically be clicked
     /// 
@@ -281,7 +237,7 @@ public enum ElementRole: String, Sendable, CaseIterable, Codable {
     /// Returns `true` for text fields and search fields.
     public var isTextInput: Bool {
         switch self {
-        case .textField, .searchField, .field:
+        case .field:
             return true
         default:
             return false
@@ -337,59 +293,126 @@ extension String {
         return String((0..<length).map { _ in characters.randomElement()! })
     }
     
-    static func consistentID(from role: String, title: String?, identifier: String?, bounds: CGRect) -> String {
-        // Create hash source from stable element properties
-        let titlePart = title ?? ""
-        let identifierPart = identifier ?? ""
-        let boundsPart = "\(Int(bounds.origin.x))_\(Int(bounds.origin.y))_\(Int(bounds.width))_\(Int(bounds.height))"
-        
-        let hashSource = "\(role)_\(titlePart)_\(identifierPart)_\(boundsPart)"
-        let hash = abs(hashSource.hashValue)
-        
-        // Convert to base62 (alphanumeric) for compact representation
-        return String.base62Encode(hash).prefix(4).uppercased()
-    }
-    
-    private static func base62Encode(_ number: Int) -> String {
-        let characters = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
-        var num = number
-        var result = ""
-        
-        repeat {
-            result = String(characters[characters.index(characters.startIndex, offsetBy: num % 62)]) + result
-            num /= 62
-        } while num > 0
-        
-        return result.isEmpty ? "0" : result
-    }
 }
 
 extension ElementRole {
     var displayName: String {
         switch self {
         case .button: return "Button"
-        case .textField: return "TextField" 
-        case .searchField: return "SearchField"
         case .field: return "Field"
         case .menuItem: return "MenuItem"
         case .menuBar: return "MenuBar"
         case .menuBarItem: return "MenuBarItem"
-        case .checkBox: return "CheckBox"
-        case .radioButton: return "RadioButton"
+        case .checkBox: return "Check"
+        case .radioButton: return "Radio"
         case .link: return "Link"
         case .tab: return "Tab"
         case .window: return "Window"
         case .staticText: return "Text"
         case .group: return "Group"
-        case .scrollArea: return "ScrollArea"
+        case .scrollArea: return "Scroll"
         case .image: return "Image"
         case .list: return "List"
         case .table: return "Table"
         case .cell: return "Cell"
-        case .popUpButton: return "PopUpButton"
+        case .popUpButton: return "PopUp"
         case .slider: return "Slider"
         case .row: return "Row"
         case .unknown: return "Unknown"
+        }
+    }
+}
+
+// MARK: - AXElement Extensions for AppPilot Compatibility
+
+extension AXElement: @retroactive @unchecked Sendable {
+    /// The title or label text of this element (mapped from description)
+    public var title: String? {
+        return self.description
+    }
+    
+    /// The current value of this element (same as description for consistency)
+    public var value: String? {
+        return self.description
+    }
+    
+    /// Convert string role to ElementRole enum
+    public var elementRole: ElementRole {
+        guard let role = self.role else { return .unknown }
+        return ElementRole(rawValue: role) ?? .unknown
+    }
+    
+    /// Whether this element is currently enabled for interaction
+    public var isEnabled: Bool {
+        return self.state?.enabled ?? true  // Default to enabled if not specified
+    }
+    
+    /// Convenience property to check if role is clickable
+    public var isClickableElement: Bool {
+        guard let role = self.role else { return false }
+        return role.isClickableRole
+    }
+    
+    /// Convenience property to check if role is text input
+    public var isTextInputElement: Bool {
+        guard let role = self.role else { return false }
+        return role.isTextInputRole
+    }
+    
+    /// The screen bounds of this element as CGRect
+    public var cgBounds: CGRect {
+        guard let position = self.position, let size = self.size else {
+            return CGRect.zero
+        }
+        return CGRect(
+            x: position.x,
+            y: position.y,
+            width: size.width,
+            height: size.height
+        )
+    }
+    
+    /// The center point of this element in screen coordinates
+    /// 
+    /// This computed property automatically calculates the center point from the element's bounds,
+    /// which is useful for click operations.
+    public var centerPoint: Point {
+        let bounds = self.cgBounds
+        return Point(x: bounds.midX, y: bounds.midY)
+    }
+}
+
+/// Convert AppPilot Point to AXUI Point
+extension Point {
+    public var axuiPoint: AXUI.Point {
+        return AXUI.Point(x: Double(self.x), y: Double(self.y))
+    }
+    
+    public init(axuiPoint: AXUI.Point) {
+        self.init(x: CGFloat(axuiPoint.x), y: CGFloat(axuiPoint.y))
+    }
+}
+
+/// String-based role checking extensions
+extension String {
+    /// Whether this role represents a clickable element
+    public var isClickableRole: Bool {
+        switch self {
+        case "Button", "MenuItem", "MenuBarItem", "Check", "Radio", 
+             "Link", "Tab", "PopUp", "Row":
+            return true
+        default:
+            return false
+        }
+    }
+    
+    /// Whether this role represents a text input element
+    public var isTextInputRole: Bool {
+        switch self {
+        case "Field", "SearchField":
+            return true
+        default:
+            return false
         }
     }
 }
@@ -541,7 +564,7 @@ public struct UISnapshot: Sendable, Codable {
     /// Find element by role and title in the snapshot
     public func findElement(role: ElementRole, title: String? = nil) -> UIElement? {
         elements.first { element in
-            element.role == role &&
+            element.elementRole == role &&
             (title == nil || element.title?.localizedCaseInsensitiveContains(title!) == true)
         }
     }
@@ -549,7 +572,7 @@ public struct UISnapshot: Sendable, Codable {
     /// Find all elements matching criteria
     public func findElements(role: ElementRole? = nil, title: String? = nil) -> [UIElement] {
         elements.filter { element in
-            (role == nil || element.role == role) &&
+            (role == nil || element.elementRole == role) &&
             (title == nil || element.title?.localizedCaseInsensitiveContains(title!) == true)
         }
     }
@@ -557,21 +580,29 @@ public struct UISnapshot: Sendable, Codable {
     /// Get elements sorted by their position (top-left to bottom-right)
     public var elementsByPosition: [UIElement] {
         elements.sorted { e1, e2 in
-            if abs(e1.bounds.minY - e2.bounds.minY) < 5 {
-                return e1.bounds.minX < e2.bounds.minX
+            let bounds1 = e1.cgBounds
+            let bounds2 = e2.cgBounds
+            if abs(bounds1.minY - bounds2.minY) < 5 {
+                return bounds1.minX < bounds2.minX
             }
-            return e1.bounds.minY < e2.bounds.minY
+            return bounds1.minY < bounds2.minY
         }
     }
     
     /// Get clickable elements only
     public var clickableElements: [UIElement] {
-        elements.filter { $0.role.isClickable && $0.isEnabled }
+        elements.filter { element in
+            guard let role = element.role else { return false }
+            return role.isClickableRole && element.isEnabled
+        }
     }
     
     /// Get text input elements only
     public var textInputElements: [UIElement] {
-        elements.filter { $0.role.isTextInput && $0.isEnabled }
+        elements.filter { element in
+            guard let role = element.role else { return false }
+            return role.isTextInputRole && element.isEnabled
+        }
     }
 }
 

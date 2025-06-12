@@ -242,7 +242,7 @@ public class ManualCompositionTestHelper {
         var candidates: [String] = []
         
         for element in elements {
-            if (element.role == .staticText || element.role == .cell || element.role == .button),
+            if (element.elementRole == .staticText || element.elementRole == .cell || element.elementRole == .button),
                let text = element.value ?? element.title,
                !text.isEmpty,
                !text.isSystemUIText() {

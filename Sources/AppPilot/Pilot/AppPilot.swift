@@ -171,7 +171,7 @@ public actor AppPilot {
     /// Find text field
     /// 
     /// Locates a text input field, optionally by placeholder text.
-    /// If no placeholder is specified, returns the first available text field or search field.
+    /// If no placeholder is specified, returns the first available text field.
     /// 
     /// - Parameters:
     ///   - window: The window to search within
@@ -184,25 +184,15 @@ public actor AppPilot {
     ) async throws -> UIElement {
         // Try to find by placeholder first, then any text field
         if let placeholder = placeholder {
-            do {
-                return try await findElement(in: window, role: .textField, title: placeholder)
-            } catch {
-                // Fall back to search field
-                return try await findElement(in: window, role: .searchField, title: placeholder)
-            }
+            return try await findElement(in: window, role: .field, title: placeholder)
         } else {
             // Find any text input field
-            let textFields = try await findElements(in: window, role: .textField)
+            let textFields = try await findElements(in: window, role: .field)
             if !textFields.isEmpty {
                 return textFields[0]
             }
             
-            let searchFields = try await findElements(in: window, role: .searchField)
-            if !searchFields.isEmpty {
-                return searchFields[0]
-            }
-            
-            throw PilotError.elementNotFound(role: .textField, title: nil)
+            throw PilotError.elementNotFound(role: .field, title: nil)
         }
     }
     
@@ -226,12 +216,12 @@ public actor AppPilot {
         inputSource: InputSource = .automatic
     ) async throws -> ActionResult {
         // Verify element is accessible and is a text input
-        guard try await accessibilityDriver.elementExists(element) && element.isEnabled else {
+        guard try await accessibilityDriver.elementExists(with: element.id) && element.isEnabled else {
             throw PilotError.elementNotAccessible(element.id)
         }
         
-        guard element.role.isTextInput else {
-            throw PilotError.invalidArgument("Element \(element.role.rawValue) is not a text input field")
+        guard element.isTextInputElement else {
+            throw PilotError.invalidArgument("Element \(element.role ?? "unknown") is not a text input field")
         }
         
         // Click the element first to focus it
@@ -264,7 +254,7 @@ public actor AppPilot {
     /// Click UI element (automatically calculates center point)
     public func click(element: UIElement) async throws -> ActionResult {
         // Verify element is still accessible and enabled
-        guard try await accessibilityDriver.elementExists(element) && element.isEnabled else {
+        guard try await accessibilityDriver.elementExists(with: element.id) && element.isEnabled else {
             throw PilotError.elementNotAccessible(element.id)
         }
         
@@ -302,17 +292,17 @@ public actor AppPilot {
         for element: UIElement
     ) async throws -> ActionResult {
         // Verify element is accessible
-        guard try await accessibilityDriver.elementExists(element) && element.isEnabled else {
+        guard try await accessibilityDriver.elementExists(with: element.id) && element.isEnabled else {
             throw PilotError.elementNotAccessible(element.id)
         }
         
         // Verify element supports value setting
-        guard element.role.isTextInput || element.role == .checkBox || element.role == .slider else {
-            throw PilotError.invalidArgument("Element \(element.role.rawValue) does not support direct value setting")
+        guard element.isTextInputElement || element.role == "Check" || element.role == "Slider" else {
+            throw PilotError.invalidArgument("Element \(element.role ?? "unknown") does not support direct value setting")
         }
         
         // Set the value directly using Accessibility API
-        try await accessibilityDriver.setValue(value, for: element)
+        try await accessibilityDriver.setValue(value, for: element.id)
         
         // Get the actual value to verify
         let actualValue = try await getValue(from: element)
@@ -334,7 +324,7 @@ public actor AppPilot {
     /// - Returns: The element's value as a string, or `nil` if no value is available
     /// - Throws: `PilotError.elementNotAccessible` if the element is no longer available
     public func getValue(from element: UIElement) async throws -> String? {
-        return try await accessibilityDriver.getValue(from: element)
+        return try await accessibilityDriver.value(for: element.id)
     }
     
     /// Check if element exists and is valid
@@ -346,7 +336,7 @@ public actor AppPilot {
     /// - Returns: `true` if the element exists and is accessible, `false` otherwise
     /// - Throws: Accessibility-related errors if permission is denied
     public func elementExists(_ element: UIElement) async throws -> Bool {
-        return try await accessibilityDriver.elementExists(element)
+        return try await accessibilityDriver.elementExists(with: element.id)
     }
     
     // MARK: - Wait Operations
@@ -822,12 +812,12 @@ public actor AppPilot {
         with composition: CompositionType
     ) async throws -> ActionResult {
         // Verify element is accessible and is a text input
-        guard try await accessibilityDriver.elementExists(element) && element.isEnabled else {
+        guard try await accessibilityDriver.elementExists(with: element.id) && element.isEnabled else {
             throw PilotError.elementNotAccessible(element.id)
         }
         
-        guard element.role.isTextInput else {
-            throw PilotError.invalidArgument("Element \(element.role.rawValue) is not a text input field")
+        guard element.isTextInputElement else {
+            throw PilotError.invalidArgument("Element \(element.role ?? "unknown") is not a text input field")
         }
         
         // Focus the element first
@@ -1220,21 +1210,21 @@ public actor AppPilot {
     /// Find all clickable elements in a window
     public func findClickableElements(in window: WindowHandle) async throws -> [UIElement] {
         let allElements = try await findElements(in: window)
-        return allElements.filter { $0.role.isClickable && $0.isEnabled }
+        return allElements.filter { $0.isClickableElement && $0.isEnabled }
     }
     
     /// Find all text input elements in a window
     public func findTextInputElements(in window: WindowHandle) async throws -> [UIElement] {
         let allElements = try await findElements(in: window)
-        return allElements.filter { $0.role.isTextInput && $0.isEnabled }
+        return allElements.filter { $0.isTextInputElement && $0.isEnabled }
     }
     
     // MARK: - Element-based Actions
     
     /// Click on a specific UI element
     public func clickElement(_ element: UIElement, in window: WindowHandle) async throws -> ActionResult {
-        print("🎯 AppPilot: Clicking element \(element.role): \(element.title ?? element.id)")
-        print("   Element bounds: \(element.bounds)")
+        print("🎯 AppPilot: Clicking element \(element.role ?? "unknown"): \(element.title ?? element.id)")
+        print("   Element bounds: \(element.bounds ?? [0, 0, 0, 0])")
         print("   Center point: \(element.centerPoint)")
         
         // Ensure target app is focused before clicking
@@ -1429,9 +1419,9 @@ public actor AppPilot {
             
             // Look for text elements that could be candidates
             let textElements = elements.filter { element in
-                (element.role == .staticText || 
-                 element.role == .cell || 
-                 element.role == .button) &&
+                (element.role == "Text" || 
+                 element.role == "Cell" || 
+                 element.role == "Button") &&
                 element.isEnabled
             }
             
