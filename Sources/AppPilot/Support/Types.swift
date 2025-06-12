@@ -223,6 +223,8 @@ public enum ElementRole: String, Sendable, CaseIterable, Codable {
     case textField = "AXTextField"
     /// A search input field
     case searchField = "AXSearchField"
+    /// A generic input field
+    case field = "AXField"
     /// A menu item
     case menuItem = "AXMenuItem"
     /// A menu bar container
@@ -279,7 +281,7 @@ public enum ElementRole: String, Sendable, CaseIterable, Codable {
     /// Returns `true` for text fields and search fields.
     public var isTextInput: Bool {
         switch self {
-        case .textField, .searchField:
+        case .textField, .searchField, .field:
             return true
         default:
             return false
@@ -329,6 +331,37 @@ extension String {
         }
         return String(self.prefix(length)) + "..."
     }
+    
+    static func randomAlphanumeric(length: Int) -> String {
+        let characters = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+        return String((0..<length).map { _ in characters.randomElement()! })
+    }
+    
+    static func consistentID(from role: String, title: String?, identifier: String?, bounds: CGRect) -> String {
+        // Create hash source from stable element properties
+        let titlePart = title ?? ""
+        let identifierPart = identifier ?? ""
+        let boundsPart = "\(Int(bounds.origin.x))_\(Int(bounds.origin.y))_\(Int(bounds.width))_\(Int(bounds.height))"
+        
+        let hashSource = "\(role)_\(titlePart)_\(identifierPart)_\(boundsPart)"
+        let hash = abs(hashSource.hashValue)
+        
+        // Convert to base62 (alphanumeric) for compact representation
+        return String.base62Encode(hash).prefix(4).uppercased()
+    }
+    
+    private static func base62Encode(_ number: Int) -> String {
+        let characters = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+        var num = number
+        var result = ""
+        
+        repeat {
+            result = String(characters[characters.index(characters.startIndex, offsetBy: num % 62)]) + result
+            num /= 62
+        } while num > 0
+        
+        return result.isEmpty ? "0" : result
+    }
 }
 
 extension ElementRole {
@@ -337,6 +370,7 @@ extension ElementRole {
         case .button: return "Button"
         case .textField: return "TextField" 
         case .searchField: return "SearchField"
+        case .field: return "Field"
         case .menuItem: return "MenuItem"
         case .menuBar: return "MenuBar"
         case .menuBarItem: return "MenuBarItem"

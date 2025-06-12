@@ -463,8 +463,8 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
             bounds = CGRect.zero
         }
         
-        // Generate unique ID based on element properties
-        let elementId = "\(windowHandle.id)_\(roleString)_\(title?.hashValue ?? identifier?.hashValue ?? Int.random(in: 1000...9999))"
+        // Generate consistent ID based on element properties
+        let elementId = String.consistentID(from: roleString, title: title, identifier: identifier, bounds: bounds)
         
         return UIElement(
             id: elementId,
