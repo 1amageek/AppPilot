@@ -102,7 +102,7 @@ public protocol CGEventDriver: Sendable {
     func switchInputSource(to source: InputSource) async throws
     func type(_ text: String, inputSource: InputSource) async throws
     
-    // v3.0 Compatibility methods
+    // Compatibility methods
     func click(at point: Point, button: MouseButton, count: Int) async throws
     func type(text: String) async throws
 }

@@ -3,7 +3,7 @@ import ApplicationServices
 import AppKit
 import AXUI
 
-// MARK: - Accessibility Driver Protocol (v3.0 - Element Discovery)
+// MARK: - Accessibility Driver Protocol
 
 public protocol AccessibilityDriver: Sendable {
     // Application and Window Management
@@ -30,7 +30,7 @@ public protocol AccessibilityDriver: Sendable {
     func checkPermission() async -> Bool
 }
 
-// MARK: - Default Accessibility Driver Implementation (v3.0)
+// MARK: - Default Accessibility Driver Implementation
 
 public actor DefaultAccessibilityDriver: AccessibilityDriver {
     

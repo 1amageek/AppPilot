@@ -593,31 +593,31 @@ do {
 
 #### Basic Click Operations
 ```swift
-// v2.0: Hardcoded coordinate clicking
+// Old: Hardcoded coordinate clicking
 try await pilot.click(window: window, at: Point(x: 534, y: 228))
 
-// 1.2: Smart element discovery and clicking
+// New: Smart element discovery and clicking
 let button = try await pilot.findButton(in: window, title: "Submit")
 try await pilot.click(element: button)
 ```
 
 #### Text Input
 ```swift
-// v2.0: Focus app and type blindly
+// Old: Focus app and type blindly
 try await pilot.type(text: "Hello World")
 
-// 1.2: Find text field and type into it
+// New: Find text field and type into it
 let textField = try await pilot.findTextField(in: window)
 try await pilot.type(text: "Hello World", into: textField)
 ```
 
 #### Element Discovery
 ```swift
-// v2.0: No element discovery, manual coordinate calculation
+// Old: No element discovery, manual coordinate calculation
 let buttonCenter = Point(x: 200, y: 150)
 try await pilot.click(window: window, at: buttonCenter)
 
-// 1.2: Automatic element discovery and interaction
+// New: Automatic element discovery and interaction
 let allButtons = try await pilot.findElements(in: window, role: .button)
 for button in allButtons where button.isEnabled {
     try await pilot.click(element: button)  // Automatically uses element.centerPoint
@@ -626,10 +626,10 @@ for button in allButtons where button.isEnabled {
 
 #### Wait Operations
 ```swift
-// v2.0: Fixed time waits
+// Old: Fixed time waits
 try await Task.sleep(nanoseconds: 2_000_000_000)
 
-// 1.2: Semantic wait conditions
+// New: Semantic wait conditions
 try await pilot.waitForElement(in: window, role: .button, title: "Continue", timeout: 10.0)
 try await pilot.wait(.elementDisappear(window: window, role: .dialog, title: "Loading"))
 ```

@@ -1,7 +1,7 @@
 import Foundation
 import CoreGraphics
 
-// MARK: - Core Identifiers (v3.0 - Handle-based)
+// MARK: - Core Identifiers
 
 /// A handle representing an application that can be automated
 /// 
@@ -149,7 +149,7 @@ public enum MouseButton: Sendable {
     }
 }
 
-// MARK: - UI Element System (v3.0)
+// MARK: - UI Element System
 
 /// A UI element discovered through the Accessibility API
 /// 
@@ -287,7 +287,7 @@ public enum ElementRole: String, Sendable, CaseIterable, Codable {
     }
 }
 
-// MARK: - Wait Specifications (v3.0)
+// MARK: - Wait Specifications
 
 /// Specifications for wait operations
 /// 
@@ -360,7 +360,7 @@ extension ElementRole {
     }
 }
 
-// MARK: - Result Types (v3.0)
+// MARK: - Result Types
 
 /// Action-specific data for different types of operations
 /// 
@@ -611,7 +611,7 @@ public extension ActionResult {
     }
 }
 
-// MARK: - Application Info (v3.0)
+// MARK: - Application Info
 
 /// Information about a running application
 /// 
@@ -649,7 +649,7 @@ public struct AppInfo: Sendable, Codable {
     }
 }
 
-// MARK: - Window Info (v3.0)
+// MARK: - Window Info
 
 /// Information about an application window
 /// 
