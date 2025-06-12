@@ -427,7 +427,7 @@ struct TestAppIntegrationTests {
             
             // Test setValue function
             print("   🔧 Setting value directly using setValue...")
-            let setValueResult = try await pilot.setValue(testValue, for: targetField)
+            let setValueResult = try await pilot.setValue(testValue, for: targetField.id)
             
             #expect(setValueResult.success, "setValue should succeed for: \(description)")
             print("   ✅ setValue operation: \(setValueResult.success ? "SUCCESS" : "FAILED")")
@@ -512,7 +512,7 @@ struct TestAppIntegrationTests {
             print("   setValue iteration \(iteration)/\(setValueIterations)")
             
             let startTime = CFAbsoluteTimeGetCurrent()
-            let result = try await pilot.setValue(testText, for: targetField)
+            let result = try await pilot.setValue(testText, for: targetField.id)
             let endTime = CFAbsoluteTimeGetCurrent()
             
             let duration = endTime - startTime
@@ -535,7 +535,7 @@ struct TestAppIntegrationTests {
             print("   input iteration \(iteration)/\(inputIterations)")
             
             // Clear field first by using setValue with empty string
-            _ = try await pilot.setValue("", for: targetField)
+            _ = try await pilot.setValue("", for: targetField.id)
             
             let startTime = CFAbsoluteTimeGetCurrent()
             let result = try await pilot.input(text: testText, into: targetField)

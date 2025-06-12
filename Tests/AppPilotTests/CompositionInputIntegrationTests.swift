@@ -33,7 +33,7 @@ struct CompositionInputIntegrationTests {
         print("\n🧠 Stage 2: 理解する (Test Composition Workflow)")
         
         // Clear any existing content using setValue
-        try await pilot.setValue("", for: textField)
+        try await pilot.setValue("", for: textField.id)
         
         // Stage 3: アクション (Action) - Execute Composition Input
         print("\n🎬 Stage 3: アクション (Execute Composition Input)")
@@ -110,7 +110,7 @@ struct CompositionInputIntegrationTests {
             print("\n📝 Test Case \(index + 1): \(testCase.2)")
             
             // Clear field using setValue
-            try await pilot.setValue("", for: textField)
+            try await pilot.setValue("", for: textField.id)
             
             // Test composition
             let result = try await pilot.input(testCase.0, into: textField, with: testCase.1)
@@ -156,7 +156,7 @@ struct CompositionInputIntegrationTests {
         }
         
         // Clear field using setValue
-        try await pilot.setValue("", for: textField)
+        try await pilot.setValue("", for: textField.id)
         
         // Start composition
         print("📝 Starting composition...")
@@ -203,7 +203,7 @@ struct CompositionInputIntegrationTests {
             print("\n📝 Testing: \(description)")
             
             // Clear field using setValue
-            try await pilot.setValue("", for: textField)
+            try await pilot.setValue("", for: textField.id)
             
             // Test composition with specific input method
             let result = try await pilot.input(text, into: textField, with: composition)

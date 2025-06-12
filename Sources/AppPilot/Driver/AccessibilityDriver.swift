@@ -377,10 +377,6 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
     
     // MARK: - Element Value Operations (ID-based)
     
-    public func getValue(from element: UIElement) async throws -> String? {
-        return try await value(for: element.id)
-    }
-    
     public func value(for id: String) async throws -> String? {
         // Find element by ID using AXUI
         guard let element = try await findElementById(id) else {
@@ -389,10 +385,6 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
         
         // Return value from AXElement
         return element.description
-    }
-    
-    public func setValue(_ value: String, for element: UIElement) async throws {
-        try await setValue(value, for: element.id)
     }
     
     public func setValue(_ value: String, for id: String) async throws {
@@ -428,10 +420,6 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
         default:
             throw PilotError.osFailure(api: "AXUIElementSetAttributeValue", code: Int32(result.rawValue))
         }
-    }
-    
-    public func elementExists(_ element: UIElement) async throws -> Bool {
-        return try await elementExists(with: element.id)
     }
     
     public func elementExists(with id: String) async throws -> Bool {

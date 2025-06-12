@@ -215,9 +215,34 @@ public actor AppPilot {
         into element: UIElement,
         inputSource: InputSource = .automatic
     ) async throws -> ActionResult {
+        return try await input(text: text, into: element.id, inputSource: inputSource)
+    }
+    
+    /// Input text into UI element by ID (optimized version)
+    /// 
+    /// - Parameters:
+    ///   - text: The text to input
+    ///   - elementID: The target UI element ID (must be a text input field)
+    ///   - inputSource: The input source to use (default: .automatic)
+    /// - Returns: An `ActionResult` containing both input text and actual text
+    /// - Throws: `PilotError.elementNotAccessible` if element is invalid or `PilotError.invalidArgument` if element is not a text input
+    public func input(
+        text: String,
+        into elementID: String,
+        inputSource: InputSource = .automatic
+    ) async throws -> ActionResult {
         // Verify element is accessible and is a text input
-        guard try await accessibilityDriver.elementExists(with: element.id) && element.isEnabled else {
-            throw PilotError.elementNotAccessible(element.id)
+        guard try await accessibilityDriver.elementExists(with: elementID) else {
+            throw PilotError.elementNotAccessible(elementID)
+        }
+        
+        // Find element to check if it's a text input
+        guard let element = try await findElementByID(elementID) else {
+            throw PilotError.elementNotAccessible(elementID)
+        }
+        
+        guard element.isEnabled else {
+            throw PilotError.elementNotAccessible(elementID)
         }
         
         guard element.isTextInputElement else {
@@ -225,7 +250,7 @@ public actor AppPilot {
         }
         
         // Click the element first to focus it
-        let _ = try await click(element: element)
+        let _ = try await click(elementID: elementID)
         
         // Wait a moment for focus to be established
         try await wait(.time(seconds: 0.1))
@@ -241,7 +266,7 @@ public actor AppPilot {
         try await wait(.time(seconds: 0.2))
         
         // Get actual text from element
-        let actualText = try await getValue(from: element)
+        let actualText = try await getValue(from: elementID)
         
         return ActionResult(
             success: true,
@@ -253,9 +278,23 @@ public actor AppPilot {
     
     /// Click UI element (automatically calculates center point)
     public func click(element: UIElement) async throws -> ActionResult {
+        return try await click(elementID: element.id)
+    }
+    
+    /// Click UI element by ID (optimized version)
+    public func click(elementID: String) async throws -> ActionResult {
         // Verify element is still accessible and enabled
-        guard try await accessibilityDriver.elementExists(with: element.id) && element.isEnabled else {
-            throw PilotError.elementNotAccessible(element.id)
+        guard try await accessibilityDriver.elementExists(with: elementID) else {
+            throw PilotError.elementNotAccessible(elementID)
+        }
+        
+        // Find element to get its bounds
+        guard let element = try await findElementByID(elementID) else {
+            throw PilotError.elementNotAccessible(elementID)
+        }
+        
+        guard element.isEnabled else {
+            throw PilotError.elementNotAccessible(elementID)
         }
         
         // Calculate center point automatically
@@ -291,9 +330,35 @@ public actor AppPilot {
         _ value: String,
         for element: UIElement
     ) async throws -> ActionResult {
+        return try await setValue(value, for: element.id)
+    }
+    
+    /// Set value directly on UI element by ID (optimized version)
+    /// 
+    /// - Parameters:
+    ///   - value: The value to set on the element
+    ///   - elementID: The target UI element ID
+    /// - Returns: An `ActionResult` indicating success
+    /// - Throws: `PilotError.elementNotAccessible` if element is invalid or `PilotError.invalidArgument` if element doesn't support value setting
+    /// 
+    /// - Warning: This bypasses all input events, IME, and application validation.
+    ///   Use `input(text:into:)` for realistic user simulation.
+    public func setValue(
+        _ value: String,
+        for elementID: String
+    ) async throws -> ActionResult {
         // Verify element is accessible
-        guard try await accessibilityDriver.elementExists(with: element.id) && element.isEnabled else {
-            throw PilotError.elementNotAccessible(element.id)
+        guard try await accessibilityDriver.elementExists(with: elementID) else {
+            throw PilotError.elementNotAccessible(elementID)
+        }
+        
+        // Find element to check if it supports value setting
+        guard let element = try await findElementByID(elementID) else {
+            throw PilotError.elementNotAccessible(elementID)
+        }
+        
+        guard element.isEnabled else {
+            throw PilotError.elementNotAccessible(elementID)
         }
         
         // Verify element supports value setting
@@ -302,10 +367,10 @@ public actor AppPilot {
         }
         
         // Set the value directly using Accessibility API
-        try await accessibilityDriver.setValue(value, for: element.id)
+        try await accessibilityDriver.setValue(value, for: elementID)
         
         // Get the actual value to verify
-        let actualValue = try await getValue(from: element)
+        let actualValue = try await getValue(from: elementID)
         
         return ActionResult(
             success: true,
@@ -324,7 +389,16 @@ public actor AppPilot {
     /// - Returns: The element's value as a string, or `nil` if no value is available
     /// - Throws: `PilotError.elementNotAccessible` if the element is no longer available
     public func getValue(from element: UIElement) async throws -> String? {
-        return try await accessibilityDriver.value(for: element.id)
+        return try await getValue(from: element.id)
+    }
+    
+    /// Get value from UI element by ID (optimized version)
+    /// 
+    /// - Parameter elementID: The UI element ID to get the value from
+    /// - Returns: The element's value as a string, or `nil` if no value is available
+    /// - Throws: `PilotError.elementNotAccessible` if the element is no longer available
+    public func getValue(from elementID: String) async throws -> String? {
+        return try await accessibilityDriver.value(for: elementID)
     }
     
     /// Check if element exists and is valid
@@ -336,7 +410,16 @@ public actor AppPilot {
     /// - Returns: `true` if the element exists and is accessible, `false` otherwise
     /// - Throws: Accessibility-related errors if permission is denied
     public func elementExists(_ element: UIElement) async throws -> Bool {
-        return try await accessibilityDriver.elementExists(with: element.id)
+        return try await elementExists(elementID: element.id)
+    }
+    
+    /// Check if element exists and is valid by ID (optimized version)
+    /// 
+    /// - Parameter elementID: The UI element ID to check
+    /// - Returns: `true` if the element exists and is accessible, `false` otherwise
+    /// - Throws: Accessibility-related errors if permission is denied
+    public func elementExists(elementID: String) async throws -> Bool {
+        return try await accessibilityDriver.elementExists(with: elementID)
     }
     
     // MARK: - Wait Operations
@@ -811,9 +894,34 @@ public actor AppPilot {
         into element: UIElement,
         with composition: CompositionType
     ) async throws -> ActionResult {
+        return try await input(text, into: element.id, with: composition)
+    }
+    
+    /// Input text with composition by element ID (optimized version)
+    /// 
+    /// - Parameters:
+    ///   - text: The text to input (e.g., romaji for Japanese)
+    ///   - elementID: The target UI element ID
+    ///   - composition: The composition type (language and input style)
+    /// - Returns: An `ActionResult` with composition data indicating current state
+    /// - Throws: Various `PilotError` cases for element/input issues
+    public func input(
+        _ text: String,
+        into elementID: String,
+        with composition: CompositionType
+    ) async throws -> ActionResult {
         // Verify element is accessible and is a text input
-        guard try await accessibilityDriver.elementExists(with: element.id) && element.isEnabled else {
-            throw PilotError.elementNotAccessible(element.id)
+        guard try await accessibilityDriver.elementExists(with: elementID) else {
+            throw PilotError.elementNotAccessible(elementID)
+        }
+        
+        // Find element to check if it's a text input
+        guard let element = try await findElementByID(elementID) else {
+            throw PilotError.elementNotAccessible(elementID)
+        }
+        
+        guard element.isEnabled else {
+            throw PilotError.elementNotAccessible(elementID)
         }
         
         guard element.isTextInputElement else {
@@ -821,7 +929,7 @@ public actor AppPilot {
         }
         
         // Focus the element first
-        let _ = try await click(element: element)
+        let _ = try await click(elementID: elementID)
         try await wait(.time(seconds: 0.1))
         
         // Switch to appropriate input source based on composition type
@@ -837,7 +945,7 @@ public actor AppPilot {
         let compositionState = try await analyzeCompositionState(for: element, inputText: text, composition: composition)
         
         // Get actual text from element
-        let actualText = try await getValue(from: element)
+        let actualText = try await getValue(from: elementID)
         
         return ActionResult(
             success: true,
@@ -866,6 +974,25 @@ public actor AppPilot {
         at index: Int,
         for element: UIElement
     ) async throws -> ActionResult {
+        return try await selectCandidate(at: index, for: element.id)
+    }
+    
+    /// Select a conversion candidate by element ID (optimized version)
+    /// 
+    /// - Parameters:
+    ///   - index: The zero-based index of the candidate to select
+    ///   - elementID: The UI element ID with active composition
+    /// - Returns: An `ActionResult` with updated composition state
+    /// - Throws: `PilotError.invalidArgument` if index is out of range
+    public func selectCandidate(
+        at index: Int,
+        for elementID: String
+    ) async throws -> ActionResult {
+        // Find element for result data
+        guard let element = try await findElementByID(elementID) else {
+            throw PilotError.elementNotAccessible(elementID)
+        }
+        
         // Navigate to the desired candidate using Tab/Shift+Tab
         // This is a simplified implementation - real implementation would need
         // to track current selection and navigate appropriately
@@ -877,7 +1004,7 @@ public actor AppPilot {
         
         // Get updated composition state
         let newState = try await getCurrentCompositionState(for: element)
-        let actualText = try await getValue(from: element)
+        let actualText = try await getValue(from: elementID)
         
         return ActionResult(
             success: true,
@@ -902,12 +1029,27 @@ public actor AppPilot {
     public func commitComposition(
         for element: UIElement
     ) async throws -> ActionResult {
+        return try await commitComposition(for: element.id)
+    }
+    
+    /// Commit the current composition by element ID (optimized version)
+    /// 
+    /// - Parameter elementID: The UI element ID with active composition
+    /// - Returns: An `ActionResult` indicating completion
+    public func commitComposition(
+        for elementID: String
+    ) async throws -> ActionResult {
+        // Find element for result data
+        guard let element = try await findElementByID(elementID) else {
+            throw PilotError.elementNotAccessible(elementID)
+        }
+        
         // Press Enter to commit
         try await cgEventDriver.keyDown(code: 36) // Return key
         try await cgEventDriver.keyUp(code: 36)
         try await wait(.time(seconds: 0.1))
         
-        let actualText = try await getValue(from: element)
+        let actualText = try await getValue(from: elementID)
         
         // Create committed composition state
         let committedState = CompositionInputResult(
@@ -942,12 +1084,27 @@ public actor AppPilot {
     public func cancelComposition(
         for element: UIElement
     ) async throws -> ActionResult {
+        return try await cancelComposition(for: element.id)
+    }
+    
+    /// Cancel the current composition by element ID (optimized version)
+    /// 
+    /// - Parameter elementID: The UI element ID with active composition
+    /// - Returns: An `ActionResult` indicating cancellation
+    public func cancelComposition(
+        for elementID: String
+    ) async throws -> ActionResult {
+        // Find element for result data
+        guard let element = try await findElementByID(elementID) else {
+            throw PilotError.elementNotAccessible(elementID)
+        }
+        
         // Press Escape to cancel
         try await cgEventDriver.keyDown(code: 53) // Escape key
         try await cgEventDriver.keyUp(code: 53)
         try await wait(.time(seconds: 0.1))
         
-        let actualText = try await getValue(from: element)
+        let actualText = try await getValue(from: elementID)
         
         return ActionResult(
             success: true,
@@ -1259,6 +1416,31 @@ public actor AppPilot {
     /// - Parameter window: The window to clear cache for, or `nil` to clear all cache
     public func clearElementCache(for window: WindowHandle? = nil) async {
         await accessibilityDriver.clearElementCache(for: window)
+    }
+    
+    // MARK: - Helper Methods
+    
+    /// Find element by ID across all windows
+    private func findElementByID(_ elementID: String) async throws -> UIElement? {
+        // Search through all applications and windows to find element with matching ID
+        let apps = try await listApplications()
+        
+        for app in apps {
+            do {
+                let windows = try await listWindows(app: app.id)
+                for window in windows {
+                    let elements = try await findElements(in: window.id)
+                    if let element = elements.first(where: { $0.id == elementID }) {
+                        return element
+                    }
+                }
+            } catch {
+                // Continue searching in other apps/windows
+                continue
+            }
+        }
+        
+        return nil
     }
     
     // MARK: - Composition Input Helper Methods

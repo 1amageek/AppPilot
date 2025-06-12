@@ -222,7 +222,7 @@ actor TestSession {
                 
                 if hasTargetImage {
                     print("🎯 Found row containing target image, clicking row instead")
-                    let result = try await pilot.click(element: row)
+                    let result = try await pilot.click(elementID: row.id)
                     
                     if result.success {
                         print("✅ Navigation successful via row click")
@@ -239,7 +239,7 @@ actor TestSession {
         // Strategy 3: Click the target image directly
         if let icon = targetIcon {
             print("🔄 Clicking target image directly")
-            let result = try await pilot.click(element: icon)
+            let result = try await pilot.click(elementID: icon.id)
             
             if result.success {
                 print("✅ Navigation successful via direct image click")
@@ -256,7 +256,7 @@ actor TestSession {
                     if row.cgBounds.contains(CGPoint(x: icon.centerPoint.x, y: icon.centerPoint.y)) {
                         print("🎯 Found parent row, clicking row as fallback")
                         do {
-                            let result = try await pilot.click(element: row)
+                            let result = try await pilot.click(elementID: row.id)
                             
                             if result.success {
                                 print("✅ Navigation successful via parent row click")

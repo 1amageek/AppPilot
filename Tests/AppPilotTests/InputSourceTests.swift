@@ -385,7 +385,7 @@ struct InputSourceTests {
             // Clear existing content
             if element.elementRole == .field {
                 print("Clearing field...")
-                _ = try await pilot.setValue("", for: element)
+                _ = try await pilot.setValue("", for: element.id)
                 try await Task.sleep(nanoseconds: 500_000_000) // 500ms
             }
             
