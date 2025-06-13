@@ -97,17 +97,11 @@ public actor DefaultScreenDriver: ScreenDriver {
             throw ScreenCaptureError.noDisplayFound
         }
         
-        let (resizedWidth, resizedHeight) = calculateResizedDimensions(
-            originalWidth: display.frame.width,
-            originalHeight: display.frame.height,
-            maxSize: 480
-        )
-        
         let filter      = SCContentFilter(display: display,
                                           excludingWindows: [])
         let config      = SCStreamConfiguration()
-        config.width    = resizedWidth
-        config.height   = resizedHeight
+        config.width    = Int(display.frame.width)
+        config.height   = Int(display.frame.height)
         config.pixelFormat       = kCVPixelFormatType_32BGRA
         config.showsCursor       = false
         config.capturesAudio     = false
@@ -141,15 +135,9 @@ public actor DefaultScreenDriver: ScreenDriver {
             .max { $0.frame.area < $1.frame.area }
             .map { (Int($0.frame.width), Int($0.frame.height)) } ?? (1920, 1080)
         
-        let (resizedWidth, resizedHeight) = calculateResizedDimensions(
-            originalWidth: CGFloat(w),
-            originalHeight: CGFloat(h),
-            maxSize: 480
-        )
-        
         let config   = SCStreamConfiguration()
-        config.width            = resizedWidth
-        config.height           = resizedHeight
+        config.width            = w
+        config.height           = h
         config.pixelFormat      = kCVPixelFormatType_32BGRA
         config.showsCursor      = false
         config.capturesAudio    = false
@@ -170,15 +158,9 @@ public actor DefaultScreenDriver: ScreenDriver {
             SCContentFilter(desktopIndependentWindow: targetWindow)
         }
         
-        let (resizedWidth, resizedHeight) = calculateResizedDimensions(
-            originalWidth: targetWindow.frame.width,
-            originalHeight: targetWindow.frame.height,
-            maxSize: 480
-        )
-        
         let config  = SCStreamConfiguration()
-        config.width            = resizedWidth
-        config.height           = resizedHeight
+        config.width            = Int(targetWindow.frame.width)
+        config.height           = Int(targetWindow.frame.height)
         config.pixelFormat      = kCVPixelFormatType_32BGRA
         config.showsCursor      = false
         config.capturesAudio    = false
@@ -251,24 +233,6 @@ public actor DefaultScreenDriver: ScreenDriver {
         guard await checkScreenRecordingPermission() else {
             throw ScreenCaptureError.permissionDenied
         }
-    }
-    
-    private func calculateResizedDimensions(
-        originalWidth: CGFloat,
-        originalHeight: CGFloat,
-        maxSize: Int = 480
-    ) -> (width: Int, height: Int) {
-        let maxDimension = max(originalWidth, originalHeight)
-        if maxDimension <= CGFloat(maxSize) {
-            // 既に最大サイズ以下の場合はそのまま
-            return (max(Int(originalWidth), 100), max(Int(originalHeight), 100))
-        }
-        
-        let scale = CGFloat(maxSize) / maxDimension
-        return (
-            width: max(Int(originalWidth * scale), 100),
-            height: max(Int(originalHeight * scale), 100)
-        )
     }
     
     @MainActor
