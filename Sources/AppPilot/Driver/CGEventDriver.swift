@@ -43,6 +43,10 @@ public enum VirtualKey: CGKeyCode, Sendable {
     case one = 18, two = 19, three = 20, four = 21, six = 22, five = 23
     case equal = 24, nine = 25, seven = 26, minus = 27, eight = 28, zero = 29
     
+    // Additional characters
+    case leftBracket = 33, rightBracket = 30, backslash = 42, quote = 39
+    case comma = 43, period = 47, slash = 44, grave = 50
+    
     // Function keys
     case f1 = 122, f2 = 120, f3 = 99, f4 = 118, f5 = 96, f6 = 97, f7 = 98
     case f8 = 100, f9 = 101, f10 = 109, f11 = 103, f12 = 111
@@ -54,6 +58,73 @@ public enum VirtualKey: CGKeyCode, Sendable {
     
     // Modifiers (for reference)
     case command = 55, shift = 56, capsLock = 57, option = 58, control = 59
+    
+    /// Character to VirtualKey mapping for type operations
+    public static let characterMapping: [Character: VirtualKey] = [
+        // Letters (lowercase)
+        "a": .a, "b": .b, "c": .c, "d": .d, "e": .e, "f": .f, "g": .g, "h": .h,
+        "i": .i, "j": .j, "k": .k, "l": .l, "m": .m, "n": .n, "o": .o, "p": .p,
+        "q": .q, "r": .r, "s": .s, "t": .t, "u": .u, "v": .v, "w": .w, "x": .x,
+        "y": .y, "z": .z,
+        
+        // Numbers (unshifted)
+        "0": .zero, "1": .one, "2": .two, "3": .three, "4": .four, "5": .five,
+        "6": .six, "7": .seven, "8": .eight, "9": .nine,
+        
+        // Special characters (unshifted)
+        "-": .minus, "=": .equal, "[": .leftBracket, "]": .rightBracket,
+        "\\": .backslash, ";": .semicolon, "'": .quote, ",": .comma,
+        ".": .period, "/": .slash, "`": .grave, " ": .space,
+        
+        // Shifted numbers (symbols)
+        "!": .one,     // Shift+1
+        "@": .two,     // Shift+2  
+        "#": .three,   // Shift+3
+        "$": .four,    // Shift+4
+        "%": .five,    // Shift+5
+        "^": .six,     // Shift+6
+        "&": .seven,   // Shift+7
+        "*": .eight,   // Shift+8
+        "(": .nine,    // Shift+9
+        ")": .zero,    // Shift+0
+        
+        // Shifted special characters
+        "_": .minus,        // Shift+-
+        "+": .equal,        // Shift+=
+        "{": .leftBracket,  // Shift+[
+        "}": .rightBracket, // Shift+]
+        "|": .backslash,    // Shift+\
+        ":": .semicolon,    // Shift+;
+        "\"": .quote,       // Shift+'
+        "<": .comma,        // Shift+,
+        ">": .period,       // Shift+.
+        "?": .slash,        // Shift+/
+        "~": .grave         // Shift+`
+    ]
+    
+    /// Characters that require shift key to be pressed
+    public static let shiftRequiredCharacters: Set<Character> = [
+        // Uppercase letters
+        "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M",
+        "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z",
+        
+        // Shifted number symbols
+        "!", "@", "#", "$", "%", "^", "&", "*", "(", ")",
+        
+        // Shifted special characters
+        "_", "+", "{", "}", "|", ":", "\"", "<", ">", "?", "~"
+    ]
+    
+    /// Get VirtualKey for a given character
+    public static func keyCode(for character: Character) -> CGKeyCode? {
+        let ch = Character(String(character).lowercased())
+        return characterMapping[ch]?.rawValue
+    }
+    
+    /// Check if character requires shift key
+    public static func requiresShift(for character: Character) -> Bool {
+        return shiftRequiredCharacters.contains(character)
+    }
 }
 
 public enum ModifierKey: Sendable {
@@ -138,8 +209,8 @@ public extension CGEventDriver {
             throw PilotError.osFailure(api: "TISGetInputSourceProperty", code: -1)
         }
         
-        let identifierString = Unmanaged<CFString>.fromOpaque(identifier).takeUnretainedValue() as String
-        let nameString = Unmanaged<CFString>.fromOpaque(name).takeUnretainedValue() as String
+        let identifierString = identifier as! CFString as String
+        let nameString = name as! CFString as String
         
         return InputSourceInfo(
             identifier: identifierString,
@@ -158,19 +229,19 @@ public extension CGEventDriver {
         
         for i in 0..<sourceCount {
             let source = CFArrayGetValueAtIndex(sources, i)
-            let tisSource = Unmanaged<TISInputSource>.fromOpaque(source!).takeUnretainedValue()
+            let tisSource = unsafeBitCast(source, to: TISInputSource.self)
             
             guard let identifier = TISGetInputSourceProperty(tisSource, kTISPropertyInputSourceID),
                   let name = TISGetInputSourceProperty(tisSource, kTISPropertyLocalizedName) else {
                 continue
             }
             
-            let identifierString = Unmanaged<CFString>.fromOpaque(identifier).takeUnretainedValue() as String
-            let nameString = Unmanaged<CFString>.fromOpaque(name).takeUnretainedValue() as String
+            let identifierString = identifier as! CFString as String
+            let nameString = name as! CFString as String
             
             // Check if this is a keyboard input source
             if let category = TISGetInputSourceProperty(tisSource, kTISPropertyInputSourceCategory) {
-                let categoryString = Unmanaged<CFString>.fromOpaque(category).takeUnretainedValue() as String
+                let categoryString = category as! CFString as String
                 if categoryString == kTISCategoryKeyboardInputSource as String {
                     inputSources.append(InputSourceInfo(
                         identifier: identifierString,
@@ -200,10 +271,10 @@ public extension CGEventDriver {
         let sourceCount = CFArrayGetCount(sourceList)
         for i in 0..<sourceCount {
             let sourceRef = CFArrayGetValueAtIndex(sourceList, i)
-            let tisSource = Unmanaged<TISInputSource>.fromOpaque(sourceRef!).takeUnretainedValue()
+            let tisSource = unsafeBitCast(sourceRef, to: TISInputSource.self)
             
             if let identifier = TISGetInputSourceProperty(tisSource, kTISPropertyInputSourceID) {
-                let identifierString = Unmanaged<CFString>.fromOpaque(identifier).takeUnretainedValue() as String
+                let identifierString = identifier as! CFString as String
                 if identifierString == source.rawValue {
                     let result = TISSelectInputSource(tisSource)
                     if result != noErr {
@@ -335,11 +406,11 @@ public actor RealCGEventDriver: CGEventDriver {
         try postKey(code: code, down: false)
     }
     
-    // High‑level type (simple, ASCII only for now)
+    // High‑level type (comprehensive character support with proper shift handling)
     public func type(_ text: String) async throws {
         for c in text {
-            if let key = keyCode(for: c) {
-                let needsShift = c.isUppercase || "!@#$%^&*()_+{}|:\"<>?".contains(c)
+            if let key = VirtualKey.keyCode(for: c) {
+                let needsShift = VirtualKey.requiresShift(for: c)
                 if needsShift { try await keyDown(code: ModifierKey.shift.keyCode) }
                 try await keyDown(code: key); try await keyUp(code: key)
                 if needsShift { try await keyUp(code: ModifierKey.shift.keyCode) }
@@ -363,10 +434,4 @@ public actor RealCGEventDriver: CGEventDriver {
         e.post(tap: .cghidEventTap)
     }
     
-    private func keyCode(for c: Character) -> CGKeyCode? {
-        let ch = String(c).lowercased()
-        return ["a":0,"b":11,"c":8,"d":2,"e":14,"f":3,"g":5,"h":4,"i":34,"j":38,"k":40,"l":37,"m":46,"n":45,"o":31,"p":35,"q":12,"r":15,"s":1,"t":17,"u":32,"v":9,"w":13,"x":7,"y":16,"z":6,
-                "0":29,"1":18,"2":19,"3":20,"4":21,"5":23,"6":22,"7":26,"8":28,"9":25,
-                "-":27,"=":24,"[":33,"]":30,"\\":42,";":41,"'":39,",":43,".":47,"/":44,"`":50][ch]
-    }
 }

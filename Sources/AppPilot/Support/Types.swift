@@ -150,100 +150,482 @@ public enum MouseButton: Sendable {
     }
 }
 
-// MARK: - UI Element System (AXUI Integration)
-
-/// Re-export AXElement from AXUI for AppPilot compatibility
-/// 
-/// `AXElement` represents a user interface element (button, text field, etc.) that can be
-/// automated. Elements are discovered using the Accessibility API and contain information
-/// about their role, position, and properties.
-/// 
-/// ```swift
-/// let button = try await pilot.findButton(in: window, title: "Submit")
-/// try await pilot.click(element: button)
-/// ```
-public typealias UIElement = AXElement
-
-/// UI element roles from the Accessibility API
-/// 
-/// `ElementRole` represents the different types of UI elements that can be discovered
-/// and automated. These correspond to AXUI's normalized accessibility roles.
-/// 
-/// ```swift
-/// // Find all buttons in a window
-/// let buttons = try await pilot.findElements(in: window, role: .button)
-/// 
-/// // Find text input fields
-/// let textFields = try await pilot.findElements(in: window, role: .field)
-/// ```
-public enum ElementRole: String, Sendable, CaseIterable, Codable {
-    /// A clickable button element
-    case button = "Button"
-    /// A text input field (includes textField, searchField, and field types)
-    case field = "Field"
-    /// A menu item
-    case menuItem = "MenuItem"
-    /// A menu bar container
-    case menuBar = "MenuBar"
-    /// A menu bar item
-    case menuBarItem = "MenuBarItem"
-    /// A checkbox element
-    case checkBox = "Check"
-    /// A radio button element
-    case radioButton = "Radio"
-    /// A clickable link
-    case link = "Link"
-    /// A tab in a tab control
-    case tab = "Tab"
-    /// A window element
+/// Accessibility element roles based on NSAccessibility constants
+/// All roles follow the project convention of removing "AX" prefixes
+public enum Role: String, Codable, CaseIterable, Sendable {
+    // Application and system
+    case application = "Application"
+    case systemWide = "SystemWide"
+    
+    // Windows and containers
     case window = "Window"
-    /// Static text that cannot be edited
-    case staticText = "Text"
-    /// A grouping container element
+    case sheet = "Sheet"
+    case drawer = "Drawer"
+    case popover = "Popover"
+    
+    // Layout and grouping
     case group = "Group"
-    /// A scrollable area
-    case scrollArea = "Scroll"
-    /// An image element
-    case image = "Image"
-    /// A list container
-    case list = "List"
-    /// A table element
-    case table = "Table"
-    /// A table cell
-    case cell = "Cell"
-    /// A popup button/dropdown
-    case popUpButton = "PopUp"
-    /// A slider control
+    case layoutArea = "LayoutArea"
+    case layoutItem = "LayoutItem"
+    case matte = "Matte"
+    case growArea = "GrowArea"
+    
+    // Controls
+    case button = "Button"
+    case popUpButton = "PopUpButton"
+    case menuButton = "MenuButton"
+    case checkBox = "CheckBox"
+    case radioButton = "RadioButton"
+    case radioGroup = "RadioGroup"
     case slider = "Slider"
-    /// A row in a list or outline
+    case incrementor = "Incrementor"
+    case comboBox = "ComboBox"
+    case disclosureTriangle = "DisclosureTriangle"
+    case colorWell = "ColorWell"
+    case link = "Link"
+    
+    // Text elements
+    case textField = "TextField"
+    case textArea = "TextArea"
+    case staticText = "StaticText"
+    
+    // Indicators
+    case busyIndicator = "BusyIndicator"
+    case progressIndicator = "ProgressIndicator"
+    case levelIndicator = "LevelIndicator"
+    case valueIndicator = "ValueIndicator"
+    case relevanceIndicator = "RelevanceIndicator"
+    
+    // Collections and tables
+    case list = "List"
+    case table = "Table"
+    case outline = "Outline"
+    case grid = "Grid"
+    case browser = "Browser"
+    case cell = "Cell"
     case row = "Row"
-    /// An unknown or unsupported element type
+    case column = "Column"
+    
+    // Navigation and menus
+    case menu = "Menu"
+    case menuBar = "MenuBar"
+    case menuBarItem = "MenuBarItem"
+    case menuItem = "MenuItem"
+    case toolbar = "Toolbar"
+    case tabGroup = "TabGroup"
+    
+    // Scrolling
+    case scrollArea = "ScrollArea"
+    case scrollBar = "ScrollBar"
+    case splitter = "Splitter"
+    case splitGroup = "SplitGroup"
+    case handle = "Handle"
+    
+    // Media and graphics
+    case image = "Image"
+    
+    // Measurement and tools
+    case ruler = "Ruler"
+    case rulerMarker = "RulerMarker"
+    
+    // Help and information
+    case helpTag = "HelpTag"
+    
+    // Web and document
+    case pageRole = "PageRole"
+    case webAreaRole = "WebAreaRole"
+    case headingRole = "HeadingRole"
+    case listMarkerRole = "ListMarkerRole"
+    case dateTimeAreaRole = "DateTimeAreaRole"
+    
+    // Fallback
     case unknown = "Unknown"
     
-    /// Whether this element type can typically be clicked
-    /// 
-    /// Returns `true` for interactive elements like buttons, links, and form controls.
-    public var isClickable: Bool {
+    // Project-specific normalized roles (from AXDumper)
+    case text = "Text"           // Normalized from StaticText
+    case scroll = "Scroll"       // Normalized from ScrollArea
+    case field = "Field"         // Normalized from TextField
+    case check = "Check"         // Normalized from CheckBox
+    case radio = "Radio"         // Normalized from RadioButton
+    case popUp = "PopUp"         // Normalized from PopUpButton
+    case generic = "Generic"     // Normalized from GenericElement
+    
+    /// Initialize from raw string value, handling both prefixed and non-prefixed formats
+    public init?(rawValue: String) {
+        // Try direct match first
+        if let role = Role.allCases.first(where: { $0.rawValue == rawValue }) {
+            self = role
+            return
+        }
+        
+        // Try with AX prefix removed
+        let cleanValue = rawValue.hasPrefix("AX") ? String(rawValue.dropFirst(2)) : rawValue
+        if let role = Role.allCases.first(where: { $0.rawValue == cleanValue }) {
+            self = role
+            return
+        }
+        
+        // Handle case variations and common mappings
+        switch cleanValue.lowercased() {
+        case "application":
+            self = .application
+        case "systemwide":
+            self = .systemWide
+        case "window":
+            self = .window
+        case "sheet":
+            self = .sheet
+        case "drawer":
+            self = .drawer
+        case "popover":
+            self = .popover
+        case "group":
+            self = .group
+        case "layoutarea":
+            self = .layoutArea
+        case "layoutitem":
+            self = .layoutItem
+        case "matte":
+            self = .matte
+        case "growarea":
+            self = .growArea
+        case "button":
+            self = .button
+        case "popupbutton":
+            self = .popUpButton
+        case "menubutton":
+            self = .menuButton
+        case "checkbox":
+            self = .checkBox
+        case "radiobutton":
+            self = .radioButton
+        case "radiogroup":
+            self = .radioGroup
+        case "slider":
+            self = .slider
+        case "incrementor":
+            self = .incrementor
+        case "combobox":
+            self = .comboBox
+        case "disclosuretriangle":
+            self = .disclosureTriangle
+        case "colorwell":
+            self = .colorWell
+        case "link":
+            self = .link
+        case "textfield":
+            self = .textField
+        case "textarea":
+            self = .textArea
+        case "statictext":
+            self = .staticText
+        case "busyindicator":
+            self = .busyIndicator
+        case "progressindicator":
+            self = .progressIndicator
+        case "levelindicator":
+            self = .levelIndicator
+        case "valueindicator":
+            self = .valueIndicator
+        case "relevanceindicator":
+            self = .relevanceIndicator
+        case "list":
+            self = .list
+        case "table":
+            self = .table
+        case "outline":
+            self = .outline
+        case "grid":
+            self = .grid
+        case "browser":
+            self = .browser
+        case "cell":
+            self = .cell
+        case "row":
+            self = .row
+        case "column":
+            self = .column
+        case "menu":
+            self = .menu
+        case "menubar":
+            self = .menuBar
+        case "menubaritem":
+            self = .menuBarItem
+        case "menuitem":
+            self = .menuItem
+        case "toolbar":
+            self = .toolbar
+        case "tabgroup":
+            self = .tabGroup
+        case "scrollarea":
+            self = .scrollArea
+        case "scrollbar":
+            self = .scrollBar
+        case "splitter":
+            self = .splitter
+        case "splitgroup":
+            self = .splitGroup
+        case "handle":
+            self = .handle
+        case "image":
+            self = .image
+        case "ruler":
+            self = .ruler
+        case "rulermarker":
+            self = .rulerMarker
+        case "helptag":
+            self = .helpTag
+        case "pagerole":
+            self = .pageRole
+        case "webarearole":
+            self = .webAreaRole
+        case "headingrole":
+            self = .headingRole
+        case "listmarkerrole":
+            self = .listMarkerRole
+        case "datetimearearole":
+            self = .dateTimeAreaRole
+        // Project-specific normalized mappings
+        case "text":
+            self = .text
+        case "scroll":
+            self = .scroll
+        case "field":
+            self = .field
+        case "check":
+            self = .check
+        case "radio":
+            self = .radio
+        case "popup":
+            self = .popUp
+        case "generic":
+            self = .generic
+        // Additional common variations
+        case "genericelement":
+            self = .generic
+        default:
+            self = .unknown
+        }
+    }
+    
+    /// Get display name for UI
+    public var displayName: String {
         switch self {
-        case .button, .menuItem, .menuBarItem, .checkBox, .radioButton, .link, .tab, .popUpButton, .row:
+        case .systemWide:
+            return "System Wide"
+        case .layoutArea:
+            return "Layout Area"
+        case .layoutItem:
+            return "Layout Item"
+        case .growArea:
+            return "Grow Area"
+        case .popUpButton:
+            return "Pop Up Button"
+        case .menuButton:
+            return "Menu Button"
+        case .checkBox:
+            return "Check Box"
+        case .radioButton:
+            return "Radio Button"
+        case .radioGroup:
+            return "Radio Group"
+        case .comboBox:
+            return "Combo Box"
+        case .disclosureTriangle:
+            return "Disclosure Triangle"
+        case .colorWell:
+            return "Color Well"
+        case .textField:
+            return "Text Field"
+        case .textArea:
+            return "Text Area"
+        case .staticText:
+            return "Static Text"
+        case .busyIndicator:
+            return "Busy Indicator"
+        case .progressIndicator:
+            return "Progress Indicator"
+        case .levelIndicator:
+            return "Level Indicator"
+        case .valueIndicator:
+            return "Value Indicator"
+        case .relevanceIndicator:
+            return "Relevance Indicator"
+        case .menuBar:
+            return "Menu Bar"
+        case .menuBarItem:
+            return "Menu Bar Item"
+        case .menuItem:
+            return "Menu Item"
+        case .tabGroup:
+            return "Tab Group"
+        case .scrollArea:
+            return "Scroll Area"
+        case .scrollBar:
+            return "Scroll Bar"
+        case .splitGroup:
+            return "Split Group"
+        case .rulerMarker:
+            return "Ruler Marker"
+        case .helpTag:
+            return "Help Tag"
+        case .pageRole:
+            return "Page Role"
+        case .webAreaRole:
+            return "Web Area Role"
+        case .headingRole:
+            return "Heading Role"
+        case .listMarkerRole:
+            return "List Marker Role"
+        case .dateTimeAreaRole:
+            return "Date Time Area Role"
+        case .popUp:
+            return "Pop Up"
+        default:
+            return rawValue
+        }
+    }
+    
+    /// Check if this role represents an interactive element
+    public var isInteractive: Bool {
+        switch self {
+        case .button, .popUpButton, .menuButton, .checkBox, .radioButton,
+             .slider, .incrementor, .comboBox, .disclosureTriangle,
+             .colorWell, .link, .textField, .textArea, .menuItem,
+             .check, .radio, .popUp, .field:
             return true
         default:
             return false
         }
     }
     
-    /// Whether this element type accepts text input
-    /// 
-    /// Returns `true` for text fields and search fields.
-    public var isTextInput: Bool {
+    /// Check if this role represents a clickable element
+    public var isClickable: Bool {
         switch self {
-        case .field:
+        case .button, .menuItem, .menuBarItem, .check, .radio, 
+             .link, .tabGroup, .row, .checkBox, .radioButton,
+             .popUpButton, .menuButton, .disclosureTriangle:
             return true
         default:
             return false
+        }
+    }
+    
+    /// Check if this role represents a text input element
+    public var isTextInput: Bool {
+        switch self {
+        case .field, .textField, .textArea:
+            return true
+        default:
+            return false
+        }
+    }
+    
+    /// Check if this role represents a container element
+    public var isContainer: Bool {
+        switch self {
+        case .group, .radioGroup, .list, .scrollArea, .splitGroup,
+             .table, .outline, .browser, .tabGroup, .row, .column,
+             .layoutArea, .layoutItem, .webAreaRole, .grid, .menu,
+             .menuBar, .window, .sheet, .drawer, .popover, .toolbar,
+             .matte, .scroll:
+            return true
+        default:
+            return false
+        }
+    }
+    
+    /// Check if this role represents a text element
+    public var isText: Bool {
+        switch self {
+        case .textField, .textArea, .staticText, .headingRole,
+             .text, .field:
+            return true
+        default:
+            return false
+        }
+    }
+    
+    /// Convert to the normalized role used in this project
+    public var normalized: Role {
+        switch self {
+        case .staticText:
+            return .text
+        case .scrollArea:
+            return .scroll
+        case .textField:
+            return .field
+        case .checkBox:
+            return .check
+        case .radioButton:
+            return .radio
+        case .popUpButton:
+            return .popUp
+        // Additional normalizations based on common UI patterns
+        case .textArea:
+            return .field
+        case .busyIndicator, .progressIndicator, .levelIndicator, .valueIndicator:
+            return .generic
+        case .menuButton:
+            return .button
+        case .incrementor:
+            return .button
+        case .disclosureTriangle:
+            return .button
+        case .tabGroup:
+            return .group
+        case .radioGroup:
+            return .group
+        case .scrollBar:
+            return .scroll
+        case .splitGroup:
+            return .group
+        case .toolbar:
+            return .group
+        case .menuBar:
+            return .group
+        case .headingRole:
+            return .text
+        case .listMarkerRole:
+            return .text
+        case .helpTag:
+            return .text
+        case .webAreaRole:
+            return .group
+        case .pageRole:
+            return .group
+        case .layoutArea, .layoutItem:
+            return .group
+        case .growArea:
+            return .generic
+        case .handle:
+            return .generic
+        case .splitter:
+            return .generic
+        case .ruler, .rulerMarker:
+            return .generic
+        case .matte:
+            return .group
+        default:
+            return self
         }
     }
 }
+
+// MARK: - UI Element System (AXUI Integration)
+
+/// Re-export AXElement and AIElement from AXUI for AppPilot compatibility
+/// 
+/// `AXElement` represents a user interface element used internally for automation.
+/// `AIElement` represents a compact, AI-optimized element format for external APIs.
+/// 
+/// ```swift
+/// let elements = try await pilot.findElements(in: window, role: .button)
+/// try await pilot.click(element: elements.first!)
+/// ```
+public typealias AXElement = AXUI.AXElement
+public typealias AIElement = AXUI.AIElement
+
 
 // MARK: - Wait Specifications
 
@@ -264,13 +646,82 @@ public enum WaitSpec: Sendable {
     /// Wait for a specific duration
     case time(seconds: TimeInterval)
     /// Wait for a UI element to appear
-    case elementAppear(window: WindowHandle, role: ElementRole, title: String)
+    case elementAppear(window: WindowHandle, role: Role, title: String)
     /// Wait for a UI element to disappear
-    case elementDisappear(window: WindowHandle, role: ElementRole, title: String)
+    case elementDisappear(window: WindowHandle, role: Role, title: String)
     /// Wait for any UI change in a window
     case uiChange(window: WindowHandle, timeout: TimeInterval)
 }
 
+
+// MARK: - AIElement Extensions for AppPilot Usage
+
+extension AIElement: @retroactive @unchecked Sendable {
+    /// Center point for click operations
+    public var centerPoint: Point {
+        guard let bounds = self.bounds, bounds.count == 4 else { 
+            return Point(x: 0.0, y: 0.0) 
+        }
+        return Point(
+            x: CGFloat(bounds[0] + bounds[2]/2), 
+            y: CGFloat(bounds[1] + bounds[3]/2)
+        )
+    }
+    
+    /// Convert bounds to CGRect
+    public var boundsAsRect: CGRect {
+        guard let bounds = self.bounds, bounds.count == 4 else { 
+            return .zero 
+        }
+        return CGRect(
+            x: bounds[0], y: bounds[1], 
+            width: bounds[2], height: bounds[3]
+        )
+    }
+    
+    /// Check if element is clickable
+    public var isClickable: Bool { 
+        guard let roleString = role?.rawValue else { return false }
+        return Role(rawValue: roleString)?.isClickable ?? false
+    }
+    
+    /// Check if element accepts text input
+    public var isTextInput: Bool {
+        guard let roleString = role?.rawValue else { return false }
+        return Role(rawValue: roleString)?.isTextInput ?? false
+    }
+    
+    /// Whether element is enabled
+    public var isEnabled: Bool {
+        state?.enabled ?? true
+    }
+    
+    /// Whether element is selected
+    public var isSelected: Bool {
+        state?.selected ?? false
+    }
+    
+    /// Whether element is focused
+    public var isFocused: Bool {
+        state?.focused ?? false
+    }
+    
+    /// Element title (mapped from value for consistency)
+    public var title: String? {
+        return value
+    }
+    
+    
+    /// Legacy compatibility properties
+    public var isTextInputElement: Bool { isTextInput }
+    public var isClickableElement: Bool { isClickable }
+    
+    /// Identifier (maps to existing id property for consistency)
+    public var identifier: String? { id }
+    
+    /// CGRect bounds for compatibility with AXElement
+    public var cgBounds: CGRect { boundsAsRect }
+}
 
 // MARK: - Extensions
 
@@ -295,68 +746,14 @@ extension String {
     
 }
 
-extension ElementRole {
-    var displayName: String {
-        switch self {
-        case .button: return "Button"
-        case .field: return "Field"
-        case .menuItem: return "MenuItem"
-        case .menuBar: return "MenuBar"
-        case .menuBarItem: return "MenuBarItem"
-        case .checkBox: return "Check"
-        case .radioButton: return "Radio"
-        case .link: return "Link"
-        case .tab: return "Tab"
-        case .window: return "Window"
-        case .staticText: return "Text"
-        case .group: return "Group"
-        case .scrollArea: return "Scroll"
-        case .image: return "Image"
-        case .list: return "List"
-        case .table: return "Table"
-        case .cell: return "Cell"
-        case .popUpButton: return "PopUp"
-        case .slider: return "Slider"
-        case .row: return "Row"
-        case .unknown: return "Unknown"
-        }
-    }
-}
 
-// MARK: - AXElement Extensions for AppPilot Compatibility
+// MARK: - AXElement Extensions for Internal Use
 
 extension AXElement: @retroactive @unchecked Sendable {
-    /// The title or label text of this element (mapped from description)
-    public var title: String? {
-        return self.description
-    }
-    
-    /// The current value of this element (same as description for consistency)
-    public var value: String? {
-        return self.description
-    }
-    
-    /// Convert string role to ElementRole enum
-    public var elementRole: ElementRole {
-        guard let role = self.role else { return .unknown }
-        return ElementRole(rawValue: role) ?? .unknown
-    }
-    
-    /// Whether this element is currently enabled for interaction
-    public var isEnabled: Bool {
-        return self.state?.enabled ?? true  // Default to enabled if not specified
-    }
-    
-    /// Convenience property to check if role is clickable
-    public var isClickableElement: Bool {
-        guard let role = self.role else { return false }
-        return role.isClickableRole
-    }
-    
-    /// Convenience property to check if role is text input
-    public var isTextInputElement: Bool {
-        guard let role = self.role else { return false }
-        return role.isTextInputRole
+    /// Convert AXElement to AIElement format for external API
+    func convertToAIFormat() -> AIElement {
+        let encoder = AXUI.AIElementEncoder()
+        return encoder.convert(from: self)
     }
     
     /// The screen bounds of this element as CGRect
@@ -373,12 +770,26 @@ extension AXElement: @retroactive @unchecked Sendable {
     }
     
     /// The center point of this element in screen coordinates
-    /// 
-    /// This computed property automatically calculates the center point from the element's bounds,
-    /// which is useful for click operations.
     public var centerPoint: Point {
         let bounds = self.cgBounds
         return Point(x: bounds.midX, y: bounds.midY)
+    }
+    
+    /// Whether this element is currently enabled for interaction
+    public var isEnabled: Bool {
+        return self.state?.enabled ?? true
+    }
+    
+    /// Whether this element is clickable based on its role
+    public var isClickableElement: Bool {
+        guard let axuiRole = self.role else { return false }
+        return Role(rawValue: axuiRole.rawValue)?.isClickable ?? false
+    }
+    
+    /// Whether this element accepts text input based on its role
+    public var isTextInputElement: Bool {
+        guard let axuiRole = self.role else { return false }
+        return Role(rawValue: axuiRole.rawValue)?.isTextInput ?? false
     }
 }
 
@@ -393,29 +804,6 @@ extension Point {
     }
 }
 
-/// String-based role checking extensions
-extension String {
-    /// Whether this role represents a clickable element
-    public var isClickableRole: Bool {
-        switch self {
-        case "Button", "MenuItem", "MenuBarItem", "Check", "Radio", 
-             "Link", "Tab", "PopUp", "Row":
-            return true
-        default:
-            return false
-        }
-    }
-    
-    /// Whether this role represents a text input element
-    public var isTextInputRole: Bool {
-        switch self {
-        case "Field", "SearchField":
-            return true
-        default:
-            return false
-        }
-    }
-}
 
 // MARK: - Result Types
 
@@ -466,7 +854,7 @@ public struct ActionResult: Sendable, Codable {
     /// When the action was performed
     public let timestamp: Date
     /// The UI element involved in the action, if any
-    public let element: UIElement?
+    public let element: AIElement?
     /// The screen coordinates where the action occurred, if applicable
     public let coordinates: Point?
     /// Action-specific data
@@ -480,7 +868,7 @@ public struct ActionResult: Sendable, Codable {
     ///   - element: The UI element involved, if any
     ///   - coordinates: The coordinates where the action occurred, if applicable
     ///   - data: Action-specific data, if any
-    public init(success: Bool, timestamp: Date = Date(), element: UIElement? = nil, coordinates: Point? = nil, data: ActionResultData? = nil) {
+    public init(success: Bool, timestamp: Date = Date(), element: AIElement? = nil, coordinates: Point? = nil, data: ActionResultData? = nil) {
         self.success = success
         self.timestamp = timestamp
         self.element = element
@@ -520,7 +908,7 @@ public struct UISnapshot: Sendable, Codable {
     public let windowInfo: WindowInfo
     
     /// All UI elements discovered in the window
-    public let elements: [UIElement]
+    public let elements: [AIElement]
     
     /// PNG data of the window screenshot
     public let imageData: Data
@@ -534,7 +922,7 @@ public struct UISnapshot: Sendable, Codable {
     public init(
         windowHandle: WindowHandle,
         windowInfo: WindowInfo,
-        elements: [UIElement],
+        elements: [AIElement],
         imageData: Data,
         timestamp: Date = Date(),
         metadata: SnapshotMetadata? = nil
@@ -562,26 +950,26 @@ public struct UISnapshot: Sendable, Codable {
     }
     
     /// Find element by role and title in the snapshot
-    public func findElement(role: ElementRole, title: String? = nil) -> UIElement? {
+    public func findElement(role: String, title: String? = nil) -> AIElement? {
         elements.first { element in
-            element.elementRole == role &&
-            (title == nil || element.title?.localizedCaseInsensitiveContains(title!) == true)
+            element.role?.rawValue == role &&
+            (title == nil || element.value?.localizedCaseInsensitiveContains(title!) == true)
         }
     }
     
     /// Find all elements matching criteria
-    public func findElements(role: ElementRole? = nil, title: String? = nil) -> [UIElement] {
+    public func findElements(role: String? = nil, title: String? = nil) -> [AIElement] {
         elements.filter { element in
-            (role == nil || element.elementRole == role) &&
-            (title == nil || element.title?.localizedCaseInsensitiveContains(title!) == true)
+            (role == nil || element.role?.rawValue == role) &&
+            (title == nil || element.value?.localizedCaseInsensitiveContains(title!) == true)
         }
     }
     
     /// Get elements sorted by their position (top-left to bottom-right)
-    public var elementsByPosition: [UIElement] {
+    public var elementsByPosition: [AIElement] {
         elements.sorted { e1, e2 in
-            let bounds1 = e1.cgBounds
-            let bounds2 = e2.cgBounds
+            let bounds1 = e1.boundsAsRect
+            let bounds2 = e2.boundsAsRect
             if abs(bounds1.minY - bounds2.minY) < 5 {
                 return bounds1.minX < bounds2.minX
             }
@@ -590,18 +978,16 @@ public struct UISnapshot: Sendable, Codable {
     }
     
     /// Get clickable elements only
-    public var clickableElements: [UIElement] {
+    public var clickableElements: [AIElement] {
         elements.filter { element in
-            guard let role = element.role else { return false }
-            return role.isClickableRole && element.isEnabled
+            element.isClickable && element.isEnabled
         }
     }
     
     /// Get text input elements only
-    public var textInputElements: [UIElement] {
+    public var textInputElements: [AIElement] {
         elements.filter { element in
-            guard let role = element.role else { return false }
-            return role.isTextInputRole && element.isEnabled
+            element.isTextInput && element.isEnabled
         }
     }
 }
@@ -829,11 +1215,11 @@ public struct AXEvent: Sendable {
     
     public let type: EventType
     public let windowHandle: WindowHandle
-    public let element: UIElement?
+    public let element: AIElement?
     public let timestamp: Date
     public let description: String?
     
-    public init(type: EventType, windowHandle: WindowHandle, element: UIElement? = nil, timestamp: Date = Date(), description: String? = nil) {
+    public init(type: EventType, windowHandle: WindowHandle, element: AIElement? = nil, timestamp: Date = Date(), description: String? = nil) {
         self.type = type
         self.windowHandle = windowHandle
         self.element = element

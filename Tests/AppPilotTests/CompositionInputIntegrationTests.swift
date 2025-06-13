@@ -42,7 +42,7 @@ struct CompositionInputIntegrationTests {
         print("📝 Testing Japanese romaji composition...")
         let result = try await pilot.input(
             "konnichiwa",
-            into: textField,
+            into: textField.id,
             with: .japaneseRomaji
         )
         
@@ -65,18 +65,18 @@ struct CompositionInputIntegrationTests {
             // Test candidate selection if needed
             if compositionData.needsUserDecision {
                 print("\n🎯 Testing candidate selection...")
-                let selectionResult = try await pilot.selectCandidate(at: 0, for: textField)
+                let selectionResult = try await pilot.selectCandidate(at: 0, for: textField.id)
                 #expect(selectionResult.success, "Candidate selection should succeed")
                 
                 // Commit the composition
                 print("✅ Committing composition...")
-                let commitResult = try await pilot.commitComposition(for: textField)
+                let commitResult = try await pilot.commitComposition(for: textField.id)
                 #expect(commitResult.success, "Composition commit should succeed")
             }
         }
         
         // Verify final result
-        let finalText = try await pilot.getValue(from: textField)
+        let finalText = try await pilot.getValue(from: textField.id)
         print("📊 Final Result: '\(finalText ?? "empty")'")
         #expect(finalText?.isEmpty == false, "Should have some text after composition")
         
@@ -113,23 +113,23 @@ struct CompositionInputIntegrationTests {
             try await pilot.setValue("", for: textField.id)
             
             // Test composition
-            let result = try await pilot.input(testCase.0, into: textField, with: testCase.1)
+            let result = try await pilot.input(testCase.0, into: textField.id, with: testCase.1)
             
             #expect(result.success, "Input should succeed for: \(testCase.0)")
             
             if result.needsUserDecision {
                 print("   User decision needed - selecting first candidate")
-                let selectionResult = try await pilot.selectCandidate(at: 0, for: textField)
+                let selectionResult = try await pilot.selectCandidate(at: 0, for: textField.id)
                 #expect(selectionResult.success, "Candidate selection should succeed")
             }
             
             if !result.isCompositionCompleted {
                 print("   Committing composition")
-                let commitResult = try await pilot.commitComposition(for: textField)
+                let commitResult = try await pilot.commitComposition(for: textField.id)
                 #expect(commitResult.success, "Commit should succeed")
             }
             
-            let finalText = try await pilot.getValue(from: textField)
+            let finalText = try await pilot.getValue(from: textField.id)
             print("   Result: '\(finalText ?? "empty")'")
             
             // Wait between test cases
@@ -160,16 +160,16 @@ struct CompositionInputIntegrationTests {
         
         // Start composition
         print("📝 Starting composition...")
-        let result = try await pilot.input("test", into: textField, with: .japaneseRomaji)
+        let result = try await pilot.input("test", into: textField.id, with: .japaneseRomaji)
         #expect(result.success, "Composition start should succeed")
         
         // Cancel composition
         print("❌ Cancelling composition...")
-        let cancelResult = try await pilot.cancelComposition(for: textField)
+        let cancelResult = try await pilot.cancelComposition(for: textField.id)
         #expect(cancelResult.success, "Composition cancellation should succeed")
         
         // Verify field is empty or has original content
-        let finalText = try await pilot.getValue(from: textField)
+        let finalText = try await pilot.getValue(from: textField.id)
         print("📊 Final text after cancellation: '\(finalText ?? "empty")'")
         
         print("✅ Composition cancellation test completed")
@@ -206,16 +206,16 @@ struct CompositionInputIntegrationTests {
             try await pilot.setValue("", for: textField.id)
             
             // Test composition with specific input method
-            let result = try await pilot.input(text, into: textField, with: composition)
+            let result = try await pilot.input(text, into: textField.id, with: composition)
             
             #expect(result.success, "Composition should succeed for: \(description)")
             
             if result.needsUserDecision {
-                let commitResult = try await pilot.commitComposition(for: textField)
+                let commitResult = try await pilot.commitComposition(for: textField.id)
                 #expect(commitResult.success, "Commit should succeed")
             }
             
-            let finalText = try await pilot.getValue(from: textField)
+            let finalText = try await pilot.getValue(from: textField.id)
             print("   Result: '\(finalText ?? "empty")'")
             
             try await Task.sleep(nanoseconds: 500_000_000) // 500ms

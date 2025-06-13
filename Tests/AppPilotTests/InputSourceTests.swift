@@ -205,7 +205,7 @@ struct InputSourceTests {
         
         // Find text fields in the keyboard tab
         let elements = try await pilot.findElements(in: testSession.window.id)
-        let textFields = elements.filter { $0.elementRole == .field }
+        let textFields = elements.filter { $0.role?.rawValue == "Field" }
         
         print("🔍 Found \(textFields.count) text fields")
         for (index, field) in textFields.enumerated() {
@@ -216,7 +216,7 @@ struct InputSourceTests {
         }
         
         // 🎯 Enhanced TextField selection with better targeting
-        var textField: UIElement?
+        var textField: AIElement?
         
         // Strategy 1: Find main input field (right panel, enabled)
         if let foundField = textFields.first(where: { field in
@@ -355,12 +355,12 @@ struct InputSourceTests {
 
     /// Helper function to perform input source testing with any element
     private func performInputSourceTestWithElement(
-        _ element: UIElement,
+        _ element: AIElement,
         pilot: AppPilot,
         testSession: TestSession
     ) async throws {
         print("\nPerforming Input Source Test")
-        print("Element: \(element.elementRole.displayName) at (\(element.centerPoint.x), \(element.centerPoint.y))")
+        print("Element: \(element.role?.rawValue ?? "unknown") at (\(element.centerPoint.x), \(element.centerPoint.y))")
         
         // Focus on the text field
         print("🖱️ Focusing on text field...")
@@ -383,7 +383,7 @@ struct InputSourceTests {
             print("\n\(index + 1)️⃣ Testing \(test.description)")
             
             // Clear existing content
-            if element.elementRole == .field {
+            if element.role?.rawValue == "Field" {
                 print("Clearing field...")
                 _ = try await pilot.setValue("", for: element.id)
                 try await Task.sleep(nanoseconds: 500_000_000) // 500ms

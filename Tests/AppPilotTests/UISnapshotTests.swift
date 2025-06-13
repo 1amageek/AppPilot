@@ -21,41 +21,32 @@ final class UISnapshotTests {
         )
         
         let elements = [
-            UIElement(
-                role: "Button",
-                description: "Submit",
+            AIElement(
+                id: "btn1",
+                role: AXUI.Role.button,
+                value: "Submit",
                 identifier: nil,
-                roleDescription: nil,
-                help: nil,
-                position: AXUI.Point(x: 300, y: 400),
-                size: AXUI.Size(width: 100, height: 40),
-                selected: false,
-                enabled: true,
-                focused: false
+                desc: nil,
+                bounds: [300, 400, 100, 40],
+                state: AXUI.AIElementState(selected: false, enabled: true, focused: false)
             ),
-            UIElement(
-                role: "Field",
-                description: "Hello",
+            AIElement(
+                id: "field1",
+                role: AXUI.Role.field,
+                value: "Hello",
                 identifier: "username_field",
-                roleDescription: nil,
-                help: nil,
-                position: AXUI.Point(x: 200, y: 200),
-                size: AXUI.Size(width: 200, height: 30),
-                selected: false,
-                enabled: true,
-                focused: false
+                desc: nil,
+                bounds: [200, 200, 200, 30],
+                state: AXUI.AIElementState(selected: false, enabled: true, focused: false)
             ),
-            UIElement(
-                role: "Text",
-                description: "Username:",
+            AIElement(
+                id: "text1",
+                role: AXUI.Role.text,
+                value: "Username:",
                 identifier: nil,
-                roleDescription: nil,
-                help: nil,
-                position: AXUI.Point(x: 100, y: 205),
-                size: AXUI.Size(width: 80, height: 20),
-                selected: false,
-                enabled: true,
-                focused: false
+                desc: nil,
+                bounds: [100, 205, 80, 20],
+                state: AXUI.AIElementState(selected: false, enabled: true, focused: false)
             )
         ]
         
@@ -88,65 +79,50 @@ final class UISnapshotTests {
     @Test("UISnapshot element filtering")
     func testElementFiltering() throws {
         let elements = [
-            UIElement(
-                role: "Button",
-                description: "Submit",
+            AIElement(
+                id: "1",
+                role: AXUI.Role.button,
+                value: "Submit",
                 identifier: "1",
-                roleDescription: nil,
-                help: nil,
-                position: AXUI.Point(x: 0, y: 0),
-                size: AXUI.Size(width: 100, height: 30),
-                selected: false,
-                enabled: true,
-                focused: false
+                desc: nil,
+                bounds: [0, 0, 100, 30],
+                state: AXUI.AIElementState(selected: false, enabled: true, focused: false)
             ),
-            UIElement(
-                role: "Button",
-                description: "Cancel",
+            AIElement(
+                id: "2",
+                role: AXUI.Role.button,
+                value: "Cancel",
                 identifier: "2",
-                roleDescription: nil,
-                help: nil,
-                position: AXUI.Point(x: 0, y: 0),
-                size: AXUI.Size(width: 100, height: 30),
-                selected: false,
-                enabled: true,
-                focused: false
+                desc: nil,
+                bounds: [0, 0, 100, 30],
+                state: AXUI.AIElementState(selected: false, enabled: true, focused: false)
             ),
-            UIElement(
-                role: "Button",
-                description: "OK",
+            AIElement(
+                id: "3",
+                role: AXUI.Role.button,
+                value: "OK",
                 identifier: "3",
-                roleDescription: nil,
-                help: nil,
-                position: AXUI.Point(x: 0, y: 0),
-                size: AXUI.Size(width: 100, height: 30),
-                selected: false,
-                enabled: false,
-                focused: false
+                desc: nil,
+                bounds: [0, 0, 100, 30],
+                state: AXUI.AIElementState(selected: false, enabled: false, focused: false)
             ),
-            UIElement(
-                role: "Field",
-                description: nil,
+            AIElement(
+                id: "4",
+                role: AXUI.Role.field,
+                value: nil,
                 identifier: "4",
-                roleDescription: nil,
-                help: nil,
-                position: AXUI.Point(x: 0, y: 0),
-                size: AXUI.Size(width: 200, height: 30),
-                selected: false,
-                enabled: true,
-                focused: false
+                desc: nil,
+                bounds: [0, 0, 200, 30],
+                state: AXUI.AIElementState(selected: false, enabled: true, focused: false)
             ),
-            UIElement(
-                role: "Text",
-                description: "Label",
+            AIElement(
+                id: "5",
+                role: AXUI.Role.text,
+                value: "Label",
                 identifier: "5",
-                roleDescription: nil,
-                help: nil,
-                position: AXUI.Point(x: 0, y: 0),
-                size: AXUI.Size(width: 100, height: 20),
-                selected: false,
-                enabled: true,
-                focused: false
+                desc: nil,
+                bounds: [0, 0, 100, 20],
+                state: AXUI.AIElementState(selected: false, enabled: true, focused: false)
             )
         ]
         
@@ -168,78 +144,66 @@ final class UISnapshotTests {
         let clickable = snapshot.clickableElements
         #expect(clickable.count == 2) // Only enabled buttons
         #expect(clickable.allSatisfy { element in
-            element.role == "Button" && element.isEnabled
+            element.role?.rawValue == "Button" && element.isEnabled
         })
         
         // Test text input elements
         let textInputs = snapshot.textInputElements
         #expect(textInputs.count == 1)
-        #expect(textInputs.first?.role == "Field")
+        #expect(textInputs.first?.role?.rawValue == "Field")
         
         // Test find element
-        let submitButton = snapshot.findElement(role: .button, title: "Submit")
-        #expect(submitButton?.description == "Submit")
+        let submitButton = snapshot.findElement(role: "Button", title: "Submit")
+        #expect(submitButton?.value == "Submit")
         #expect(submitButton?.id == "1")
         
         // Test find elements
-        let buttons = snapshot.findElements(role: .button)
+        let buttons = snapshot.findElements(role: "Button")
         #expect(buttons.count == 3)
         
         let cancelElements = snapshot.findElements(title: "Cancel")
         #expect(cancelElements.count == 1)
-        #expect(cancelElements.first?.description == "Cancel")
+        #expect(cancelElements.first?.value == "Cancel")
     }
     
     @Test("UISnapshot elements by position")
     func testElementsByPosition() throws {
         let elements = [
-            UIElement(
-                role: "Button",
-                description: nil,
+            AIElement(
+                id: "1",
+                role: AXUI.Role.button,
+                value: nil,
                 identifier: "1",
-                roleDescription: nil,
-                help: nil,
-                position: AXUI.Point(x: 100, y: 100),
-                size: AXUI.Size(width: 50, height: 30),
-                selected: false,
-                enabled: true,
-                focused: false
+                desc: nil,
+                bounds: [100, 100, 50, 30],
+                state: AXUI.AIElementState(selected: false, enabled: true, focused: false)
             ),
-            UIElement(
-                role: "Button",
-                description: nil,
+            AIElement(
+                id: "2",
+                role: AXUI.Role.button,
+                value: nil,
                 identifier: "2",
-                roleDescription: nil,
-                help: nil,
-                position: AXUI.Point(x: 200, y: 100),
-                size: AXUI.Size(width: 50, height: 30),
-                selected: false,
-                enabled: true,
-                focused: false
+                desc: nil,
+                bounds: [200, 100, 50, 30],
+                state: AXUI.AIElementState(selected: false, enabled: true, focused: false)
             ),
-            UIElement(
-                role: "Button",
-                description: nil,
+            AIElement(
+                id: "3",
+                role: AXUI.Role.button,
+                value: nil,
                 identifier: "3",
-                roleDescription: nil,
-                help: nil,
-                position: AXUI.Point(x: 50, y: 200),
-                size: AXUI.Size(width: 50, height: 30),
-                selected: false,
-                enabled: true,
-                focused: false
+                desc: nil,
+                bounds: [50, 200, 50, 30],
+                state: AXUI.AIElementState(selected: false, enabled: true, focused: false)
             ),
-            UIElement(
-                role: "Button",
-                description: nil,
+            AIElement(
+                id: "4",
+                role: AXUI.Role.button,
+                value: nil,
                 identifier: "4",
-                roleDescription: nil,
-                help: nil,
-                position: AXUI.Point(x: 150, y: 200),
-                size: AXUI.Size(width: 50, height: 30),
-                selected: false,
-                enabled: true,
-                focused: false
+                desc: nil,
+                bounds: [150, 200, 50, 30],
+                state: AXUI.AIElementState(selected: false, enabled: true, focused: false)
             )
         ]
         
@@ -285,6 +249,7 @@ final class UISnapshotTests {
         #expect(emptyMetadata.tags.isEmpty)
         #expect(emptyMetadata.customData.isEmpty)
     }
+    
 }
 
 @Suite("UISnapshot Integration Tests")
@@ -321,7 +286,7 @@ final class UISnapshotIntegrationTests {
             #expect(snapshot.image != nil, "Should be able to reconstruct CGImage")
             
             // Verify we can find common UI elements
-            let buttons = snapshot.findElements(role: .button)
+            let buttons = snapshot.findElements(role: "Button")
             print("Found \(buttons.count) buttons in snapshot")
             
         } catch PilotError.applicationNotFound {

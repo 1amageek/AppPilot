@@ -1,12 +1,13 @@
 import Foundation
+import AXUI
 
 public enum PilotError: Error, Sendable {
     case permissionDenied(String)
     case applicationNotFound(String)
     case windowNotFound(WindowHandle)
-    case elementNotFound(role: ElementRole, title: String?)
+    case elementNotFound(role: String, title: String?)
     case elementNotAccessible(String)
-    case multipleElementsFound(role: ElementRole, title: String?, count: Int)
+    case multipleElementsFound(role: String, title: String?, count: Int)
     case eventCreationFailed
     case coordinateOutOfBounds(Point)
     case timeout(TimeInterval)
@@ -30,17 +31,17 @@ extension PilotError: LocalizedError {
             return "Window not found: \(windowHandle.id)"
         case .elementNotFound(let role, let title):
             if let title = title {
-                return "UI element not found: \(role.rawValue) with title '\(title)'"
+                return "UI element not found: \(role) with title '\(title)'"
             } else {
-                return "UI element not found: \(role.rawValue)"
+                return "UI element not found: \(role)"
             }
         case .elementNotAccessible(let elementId):
             return "UI element not accessible or disabled: \(elementId)"
         case .multipleElementsFound(let role, let title, let count):
             if let title = title {
-                return "Multiple elements found (\(count)): \(role.rawValue) with title '\(title)'. Use more specific criteria."
+                return "Multiple elements found (\(count)): \(role) with title '\(title)'. Use more specific criteria."
             } else {
-                return "Multiple elements found (\(count)): \(role.rawValue). Use more specific criteria."
+                return "Multiple elements found (\(count)): \(role). Use more specific criteria."
             }
         case .eventCreationFailed:
             return "Failed to create CGEvent"

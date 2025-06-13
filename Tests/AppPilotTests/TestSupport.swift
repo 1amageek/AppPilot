@@ -174,10 +174,10 @@ actor TestSession {
         // Debug: List all elements to understand the structure
         let allElements = try await pilot.findElements(in: window.id)
         let imageElements = allElements.filter { element in
-            element.elementRole == .image
+            element.role?.rawValue == "Image"
         }
         let rowElements = allElements.filter { element in
-            element.elementRole == .row
+            element.role?.rawValue == "Row"
         }
         
         print("🔍 Found \(imageElements.count) image elements:")
@@ -192,7 +192,7 @@ actor TestSession {
         }
         
         // Strategy 1: Find the target image by identifier
-        var targetIcon: UIElement?
+        var targetIcon: AIElement?
         
         // Find the specific image with matching identifier
         let imagesByIdentifier = imageElements.filter { $0.identifier == imageIdentifier }
@@ -214,7 +214,7 @@ actor TestSession {
                 
                 // Check if any image in this row has our target identifier
                 let imagesInRow = elementsInRow.filter { element in
-                    element.elementRole == ElementRole.image
+                    element.role?.rawValue == "Image"
                 }
                 let hasTargetImage = imagesInRow.contains { element in
                     element.identifier == imageIdentifier

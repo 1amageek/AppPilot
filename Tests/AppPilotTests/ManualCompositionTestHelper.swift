@@ -150,7 +150,7 @@ public class ManualCompositionTestHelper {
             
             // Test composition input
             print("\n📝 Testing composition input...")
-            let result = try await pilot.input("konnichiwa", into: textField, with: .japaneseRomaji)
+            let result = try await pilot.input("konnichiwa", into: textField.id, with: .japaneseRomaji)
             
             print("📊 Composition Result:")
             print("   Success: \(result.success)")
@@ -242,7 +242,7 @@ public class ManualCompositionTestHelper {
         var candidates: [String] = []
         
         for element in elements {
-            if (element.elementRole == .staticText || element.elementRole == .cell || element.elementRole == .button),
+            if (element.role?.rawValue == "Text" || element.role?.rawValue == "Cell" || element.role?.rawValue == "Button"),
                let text = element.value ?? element.title,
                !text.isEmpty,
                !text.isSystemUIText() {

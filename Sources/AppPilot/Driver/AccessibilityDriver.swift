@@ -15,8 +15,8 @@ public protocol AccessibilityDriver: Sendable {
     func findWindow(app: AppHandle, index: Int) async throws -> WindowHandle?
     
     // UI Element Discovery (ID-based)
-    func findElements(in window: WindowHandle, role: ElementRole?, title: String?, identifier: String?) async throws -> [UIElement]
-    func findElement(in window: WindowHandle, role: ElementRole, title: String?, identifier: String?) async throws -> UIElement
+    func findElements(in window: WindowHandle, role: Role?, title: String?, identifier: String?) async throws -> [AIElement]
+    func findElement(in window: WindowHandle, role: Role, title: String?, identifier: String?) async throws -> AIElement
     func elementExists(with id: String) async throws -> Bool
     func value(for id: String) async throws -> String?
     func setValue(_ value: String, for id: String) async throws
@@ -36,6 +36,8 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
     private var handleCounter = 0
     private var appHandles: [String: AppHandleData] = [:]
     private var windowHandles: [String: WindowHandleData] = [:]
+    // Element ID to WindowHandle reverse index for fast lookup
+    private var elementIdToWindow: [String: WindowHandle] = [:]
     // Element caching is now handled by AXUI's ID system
     
     private struct AppHandleData {
@@ -161,7 +163,7 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
     
     // MARK: - UI Element Discovery
     
-    public func findElements(in windowHandle: WindowHandle, role: ElementRole?, title: String?, identifier: String?) async throws -> [UIElement] {
+    public func findElements(in windowHandle: WindowHandle, role: Role?, title: String?, identifier: String?) async throws -> [AIElement] {
         
         // Check accessibility permission first
         guard await checkPermission() else {
@@ -187,14 +189,22 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
         // Use AXUI's flat element dumping
         let axElements = try AXDumper.dumpWindow(bundleIdentifier: bundleId, windowIndex: windowIndex)
         
-        // Convert AXElements to UIElements with improved filtering
-        let uiElements = convertAXElementsToUIElements(axElements, windowHandle: windowHandle)
+        // Convert AXElements to AIElements with improved filtering
+        let aiElements = convertAXElementsToAIElements(axElements, windowHandle: windowHandle)
+        
+        // Build reverse index: element ID -> window handle for fast lookup
+        for element in aiElements {
+            elementIdToWindow[element.id] = windowHandle
+        }
+        
+        // Convert Role to AXUI.Role for filtering
+        let axuiRole: AXUI.Role? = role.flatMap { roleToAXUIRole($0) }
         
         // Apply precise filtering with AND logic
-        return filterElementsWithANDLogic(uiElements, role: role, title: title, identifier: identifier)
+        return filterElementsWithANDLogic(aiElements, role: axuiRole, title: title, identifier: identifier)
     }
     
-    public func findElement(in window: WindowHandle, role: ElementRole, title: String? = nil, identifier: String? = nil) async throws -> UIElement {
+    public func findElement(in window: WindowHandle, role: Role, title: String? = nil, identifier: String? = nil) async throws -> AIElement {
         // At least one of title or identifier must be provided
         guard title != nil || identifier != nil else {
             throw PilotError.invalidArgument("Either title or identifier must be provided")
@@ -206,12 +216,12 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
         switch elements.count {
         case 0:
             let criteria = [title.map {"title: '\($0)'"}, identifier.map {"identifier: '\($0)'"}].compactMap {$0}.joined(separator: ", ")
-            throw PilotError.elementNotFound(role: role, title: "\(role.rawValue) with \(criteria)")
+            throw PilotError.elementNotFound(role: role.rawValue, title: "\(role.rawValue) with \(criteria)")
         case 1:
             return elements[0]
         default:
             // Multiple matches - use refined selection logic
-            let refined = selectBestMatch(from: elements, role: role, title: title, identifier: identifier)
+            let refined = selectBestMatch(from: elements, role: role.rawValue, title: title, identifier: identifier)
             return refined
         }
     }
@@ -330,18 +340,21 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
     
     
     
-    private func getStringAttribute(from element: AXUIElement, attribute: String) -> String? {
+    /// Generic attribute getter that handles different types safely
+    private func axValue<T>(_ element: AXUIElement, _ attribute: String, as type: T.Type = T.self) -> T? {
         var value: CFTypeRef?
         let result = AXUIElementCopyAttributeValue(element, attribute as CFString, &value)
         guard result == .success else { return nil }
-        return value as? String
+        return value as? T
+    }
+    
+    /// Specialized attribute getters using the generic method
+    private func getStringAttribute(from element: AXUIElement, attribute: String) -> String? {
+        return axValue(element, attribute, as: String.self)
     }
     
     private func getBoolAttribute(from element: AXUIElement, attribute: String) -> Bool? {
-        var value: CFTypeRef?
-        let result = AXUIElementCopyAttributeValue(element, attribute as CFString, &value)
-        guard result == .success else { return nil }
-        return value as? Bool
+        return axValue(element, attribute, as: Bool.self)
     }
     
     private func getWindowBounds(from window: AXUIElement) throws -> CGRect {
@@ -429,26 +442,25 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
     
     // MARK: - Helper Methods for Improved Element Discovery
     
-    private func convertAXElementsToUIElements(_ axElements: [AXElement], windowHandle: WindowHandle) -> [UIElement] {
+    private func convertAXElementsToAIElements(_ axElements: [AXElement], windowHandle: WindowHandle) -> [AIElement] {
         return axElements.compactMap { axElement in
-            createUIElementFromAXElement(axElement, windowHandle: windowHandle)
+            createAIElementFromAXElement(axElement, windowHandle: windowHandle)
         }
     }
     
-    private func createUIElementFromAXElement(_ axElement: AXElement, windowHandle: WindowHandle) -> UIElement? {
+    private func createAIElementFromAXElement(_ axElement: AXElement, windowHandle: WindowHandle) -> AIElement? {
         guard let _ = axElement.role else { return nil }
         
-        // Return the AXElement directly (since UIElement is aliased to AXElement)
-        // Note: We can't access axElementRef directly as it's internal in AXUI
-        return axElement
+        // Convert AXElement to AIElement using the convertToAIFormat method
+        return axElement.convertToAIFormat()
     }
     
-    private func filterElementsWithANDLogic(_ elements: [UIElement], role: ElementRole?, title: String?, identifier: String?) -> [UIElement] {
+    private func filterElementsWithANDLogic(_ elements: [AIElement], role: AXUI.Role?, title: String?, identifier: String?) -> [AIElement] {
         return elements.filter { element in
             // AND logic: all specified criteria must match
             
-            // Role matching - compare against AXElement's role string
-            if let role = role, element.role != role.rawValue {
+            // Role matching - compare against AXElement's role
+            if let role = role, element.role != role {
                 return false
             }
             
@@ -465,15 +477,15 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
                 return false
             }
             
-            // Additional quality filters using AXElement properties
-            let bounds = element.cgBounds
+            // Additional quality filters using AIElement properties
+            let bounds = element.boundsAsRect
             return element.isEnabled &&
                    bounds.width > 0 &&
                    bounds.height > 0
         }
     }
     
-    private func selectBestMatch(from elements: [UIElement], role: ElementRole, title: String?, identifier: String?) -> UIElement {
+    private func selectBestMatch(from elements: [AIElement], role: String, title: String?, identifier: String?) -> AIElement {
         // 1. If identifier is specified, prefer exact identifier matches
         if let identifier = identifier {
             let identifierMatches = elements.filter { element in
@@ -531,7 +543,31 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
     // MARK: - ID-based Element Lookup
     
     private func findElementById(_ elementId: String) async throws -> AXElement? {
-        // Search through all applications and windows to find element with matching ID
+        // Fast path: use reverse index if available
+        if let windowHandle = elementIdToWindow[elementId] {
+            guard let windowData = windowHandles[windowHandle.id],
+                  let appData = appHandles[windowData.appHandle.id],
+                  let bundleId = appData.app.bundleIdentifier else {
+                return nil
+            }
+            
+            do {
+                let windowIndex = try await getWindowIndex(for: windowHandle)
+                let elements = try AXDumper.dumpWindow(
+                    bundleIdentifier: bundleId,
+                    windowIndex: windowIndex,
+                    includeZeroSize: false
+                )
+                
+                if let element = elements.first(where: { $0.id == elementId }) {
+                    return element
+                }
+            } catch {
+                // If fast path fails, fall back to full search
+            }
+        }
+        
+        // Slow path: search through all applications and windows (fallback)
         for (_, windowData) in windowHandles {
             do {
                 let bundleId = appHandles[windowData.appHandle.id]?.app.bundleIdentifier ?? ""
@@ -546,6 +582,8 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
                 
                 // Find element with matching ID
                 if let element = elements.first(where: { $0.id == elementId }) {
+                    // Update reverse index for future lookups
+                    elementIdToWindow[elementId] = windowData.handle
                     return element
                 }
             } catch {
@@ -618,7 +656,7 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
         let size = getSizeAttribute(from: axElement)
         
         // Match based on role, identifier, and position/size
-        let roleMatches = role == target.role
+        let roleMatches = role == target.role?.rawValue
         let identifierMatches = identifier == target.identifier
         let descriptionMatches = description == target.description
         
@@ -645,8 +683,14 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
     // MARK: - Cache Management
     
     public func clearElementCache(for window: WindowHandle?) async {
+        if let window = window {
+            // Clear reverse index entries for the specific window
+            elementIdToWindow = elementIdToWindow.filter { $1 != window }
+        } else {
+            // Clear all reverse index entries
+            elementIdToWindow.removeAll()
+        }
         // Element caching is now handled by AXUI internally
-        // This method is kept for API compatibility but does nothing
         // AXUI manages element lifecycle through its ID system
     }
     
@@ -704,6 +748,32 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
     
     public func checkPermission() async -> Bool {
         return AXDumper.checkAccessibilityPermissions()
+    }
+    
+    // MARK: - String to AXUI.Role Conversion
+    
+    /// Convert Role to AXUI.Role
+    private func roleToAXUIRole(_ role: Role) -> AXUI.Role? {
+        switch role {
+        case .button:
+            return .button
+        case .field, .textField:
+            return .field
+        case .text, .staticText:
+            return .text
+        case .link:
+            return .link
+        case .image:
+            return .image
+        case .check, .checkBox:
+            return .check
+        case .radio, .radioButton:
+            return .radio
+        case .slider:
+            return .slider
+        default:
+            return nil
+        }
     }
 }
 
