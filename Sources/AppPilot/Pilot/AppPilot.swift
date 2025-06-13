@@ -2,6 +2,7 @@ import Foundation
 import CoreGraphics
 import AppKit
 import UniformTypeIdentifiers
+import AXUI
 
 public actor AppPilot {
     private let cgEventDriver: CGEventDriver
@@ -195,6 +196,7 @@ public actor AppPilot {
             throw PilotError.elementNotFound(role: "Field", title: nil)
         }
     }
+    
     
     // MARK: - Element-Based Actions
     
@@ -1168,53 +1170,39 @@ public actor AppPilot {
         return windowImage
     }
     
-    /// Capture a complete UI snapshot of a window
-    /// 
-    /// Creates a comprehensive snapshot containing both the visual state (screenshot) and
-    /// the structural state (UI element hierarchy) of a window. This is useful for debugging,
-    /// testing, and analyzing UI state at a specific point in time.
-    /// 
-    /// The snapshot includes:
-    /// - Window screenshot as PNG data
-    /// - Complete UI element tree with AXUI optimized discovery
-    /// - Window metadata and timestamp
-    /// - Optional custom metadata for categorization
-    /// 
+    /// Capture a selective UI snapshot with AXQuery for token-efficient element discovery
+    ///
+    /// This method combines window screenshot capture with selective UI element discovery
+    /// using AXUI.AXQuery to reduce token consumption by only fetching elements matching
+    /// specific criteria instead of all elements in the window.
+    ///
     /// - Parameters:
-    ///   - window: The window to snapshot
-    ///   - metadata: Optional metadata to attach to the snapshot
-    /// - Returns: A `UISnapshot` containing the window's visual and structural state
+    ///   - window: The window to capture
+    ///   - query: Optional AXUI.AXQuery to filter elements (nil = all elements)
+    ///
+    /// - Returns: UISnapshot containing screenshot and filtered element hierarchy
+    ///
     /// - Throws: 
-    ///   - `PilotError.windowNotFound` if the window handle is invalid
-    ///   - `PilotError.permissionDenied` if accessibility permission is not granted
-    /// 
-    /// ## Usage Example
+    ///   - `PilotError.windowNotFound` if window doesn't exist
+    ///   - `PilotError.imageConversionFailed` if screenshot conversion fails
+    ///   - `PilotError.permissionDenied` if accessibility permission not granted
+    ///
+    /// Example usage:
     /// ```swift
-    /// // Basic snapshot
-    /// let snapshot = try await pilot.snapshot(window: window)
-    /// 
-    /// // Snapshot with metadata
-    /// let snapshot = try await pilot.snapshot(
-    ///     window: window,
-    ///     metadata: SnapshotMetadata(
-    ///         description: "Before clicking submit button",
-    ///         tags: ["test", "form-submission"],
-    ///         customData: ["testCase": "TC-001"]
-    ///     )
-    /// )
-    /// 
-    /// // Analyze snapshot
-    /// let buttons = snapshot.clickableElements
-    /// print("Found \(buttons.count) clickable buttons")
-    /// 
-    /// // Save snapshot image
-    /// if let image = snapshot.image {
-    ///     // Use image...
-    /// }
+    /// // Get only buttons (token-efficient)
+    /// let buttonQuery = AXUI.AXQuery.button()
+    /// let snapshot = try await pilot.snapshot(window: window, query: buttonQuery)
+    ///
+    /// // Get text fields
+    /// let textFieldQuery = AXUI.AXQuery.textField()
+    /// let snapshot = try await pilot.snapshot(window: window, query: textFieldQuery)
+    ///
+    /// // Get all elements (same as snapshot(window:))
+    /// let fullSnapshot = try await pilot.snapshot(window: window)
     /// ```
     public func snapshot(
         window: WindowHandle,
-        metadata: SnapshotMetadata? = nil
+        query: AXUI.AXQuery? = nil
     ) async throws -> UISnapshot {
         // Get window information
         let apps = try await listApplications()
@@ -1246,21 +1234,39 @@ public actor AppPilot {
             throw PilotError.imageConversionFailed
         }
         
-        // Get all UI elements in the window using AXUI optimized discovery
-        let elements = try await findElements(in: window)
+        // Get bundle identifier for AXDumper
+        guard let targetApp = targetApp,
+              let bundleId = targetApp.bundleIdentifier else {
+            throw PilotError.applicationNotFound("Bundle identifier not found")
+        }
+        
+        // Verify window exists
+        let windows = try await listWindows(app: targetApp.id)
+        guard windows.contains(where: { $0.id == window }) else {
+            throw PilotError.windowNotFound(window)
+        }
+        
+        // Use AXDumper.dump() directly with AXQuery for efficient element discovery
+        let axElements = try AXDumper.dump(
+            bundleIdentifier: bundleId,
+            query: query,
+            includeZeroSize: false
+        )
+        
+        // Convert AXElements to AIElements
+        let elements = axElements.compactMap { axElement in
+            // Convert AXElement to AIElement using the convertToAIFormat method
+            axElement.convertToAIFormat()
+        }
         
         // Create and return the snapshot
         return UISnapshot(
             windowHandle: window,
             windowInfo: windowInfo,
             elements: elements,
-            imageData: imageData,
-            timestamp: Date(),
-            metadata: metadata
+            imageData: imageData
         )
     }
-    
-    
     
     // MARK: - Convenience Methods
     

@@ -635,7 +635,6 @@ public enum WaitSpec: Sendable {
     case uiChange(window: WindowHandle, timeout: TimeInterval)
 }
 
-
 // MARK: - AIElement Extensions for AppPilot Usage
 
 extension AIElement: @retroactive @unchecked Sendable {
@@ -889,32 +888,22 @@ public struct UISnapshot: Sendable, Codable {
     /// Window information at the time of snapshot
     public let windowInfo: WindowInfo
     
-    /// All UI elements discovered in the window
+    /// UI elements discovered in the window (filtered by query if provided)
     public let elements: [AIElement]
     
     /// PNG data of the window screenshot
     public let imageData: Data
     
-    /// When this snapshot was captured
-    public let timestamp: Date
-    
-    /// Optional metadata about the snapshot
-    public let metadata: SnapshotMetadata?
-    
     public init(
         windowHandle: WindowHandle,
         windowInfo: WindowInfo,
         elements: [AIElement],
-        imageData: Data,
-        timestamp: Date = Date(),
-        metadata: SnapshotMetadata? = nil
+        imageData: Data
     ) {
         self.windowHandle = windowHandle
         self.windowInfo = windowInfo
         self.elements = elements
         self.imageData = imageData
-        self.timestamp = timestamp
-        self.metadata = metadata
     }
     
     /// Reconstructs the CGImage from stored PNG data
@@ -972,29 +961,9 @@ public struct UISnapshot: Sendable, Codable {
             element.isTextInput && element.isEnabled
         }
     }
+    
 }
 
-/// Metadata about a UI snapshot
-public struct SnapshotMetadata: Sendable, Codable {
-    /// Optional description of what this snapshot captures
-    public let description: String?
-    
-    /// Tags for categorizing snapshots
-    public let tags: [String]
-    
-    /// Any additional custom data
-    public let customData: [String: String]
-    
-    public init(
-        description: String? = nil,
-        tags: [String] = [],
-        customData: [String: String] = [:]
-    ) {
-        self.description = description
-        self.tags = tags
-        self.customData = customData
-    }
-}
 
 // MARK: - ActionResult Extensions
 

@@ -53,19 +53,12 @@ final class UISnapshotTests {
         // Create dummy PNG data
         let imageData = Data([0x89, 0x50, 0x4E, 0x47]) // PNG header
         
-        let metadata = SnapshotMetadata(
-            description: "Test snapshot",
-            tags: ["unit-test", "sample"],
-            customData: ["testCase": "UISnapshotTests"]
-        )
-        
         // Create snapshot
         let snapshot = UISnapshot(
             windowHandle: windowHandle,
             windowInfo: windowInfo,
             elements: elements,
-            imageData: imageData,
-            metadata: metadata
+            imageData: imageData
         )
         
         // Test properties
@@ -73,7 +66,6 @@ final class UISnapshotTests {
         #expect(snapshot.windowInfo.title == "Test Window")
         #expect(snapshot.elements.count == 3)
         #expect(snapshot.imageData == imageData)
-        #expect(snapshot.metadata?.description == "Test snapshot")
     }
     
     @Test("UISnapshot element filtering")
@@ -231,24 +223,6 @@ final class UISnapshotTests {
         #expect(sorted[3].id == "4") // Bottom-right
     }
     
-    @Test("SnapshotMetadata initialization")
-    func testSnapshotMetadata() throws {
-        let metadata = SnapshotMetadata(
-            description: "Test description",
-            tags: ["tag1", "tag2"],
-            customData: ["key": "value"]
-        )
-        
-        #expect(metadata.description == "Test description")
-        #expect(metadata.tags == ["tag1", "tag2"])
-        #expect(metadata.customData["key"] == "value")
-        
-        // Test default initialization
-        let emptyMetadata = SnapshotMetadata()
-        #expect(emptyMetadata.description == nil)
-        #expect(emptyMetadata.tags.isEmpty)
-        #expect(emptyMetadata.customData.isEmpty)
-    }
     
 }
 
@@ -271,11 +245,7 @@ final class UISnapshotIntegrationTests {
             
             // Capture snapshot
             let snapshot = try await pilot.snapshot(
-                window: window.id,
-                metadata: SnapshotMetadata(
-                    description: "Integration test snapshot",
-                    tags: ["test"]
-                )
+                window: window.id
             )
             
             // Verify snapshot
