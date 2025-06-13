@@ -46,24 +46,6 @@ public struct WindowHandle: Hashable, Sendable, Codable {
     }
 }
 
-// MARK: - Legacy Support (Internal Use)
-
-internal struct AppID: Hashable, Sendable {
-    internal let pid: pid_t
-    
-    internal init(pid: pid_t) {
-        self.pid = pid
-    }
-}
-
-internal struct WindowID: Hashable, Sendable {
-    internal let id: CGWindowID
-    
-    internal init(id: CGWindowID) {
-        self.id = id
-    }
-}
-
 // MARK: - Geometry
 
 /// A point in screen coordinates
