@@ -198,10 +198,9 @@ struct InputSourceTests {
         // Stage 2: 理解する (Understand) - Find text field
         print("\n🧠 Stage 3: 理解する (Find Text Input Field)")
         
-        // 🧹 Clear element cache to ensure fresh UI discovery after navigation
-        print("🧹 Clearing element cache for fresh UI discovery...")
-        await pilot.clearElementCache(for: testSession.window.id)
-        try await Task.sleep(nanoseconds: 500_000_000) // 500ms for cache clear
+        // Wait for UI to stabilize after navigation
+        print("⏳ Waiting for UI to stabilize...")
+        try await Task.sleep(nanoseconds: 500_000_000) // 500ms for UI stabilization
         
         // Find text fields in the keyboard tab
         let elements = try await pilot.findElements(in: testSession.window.id)

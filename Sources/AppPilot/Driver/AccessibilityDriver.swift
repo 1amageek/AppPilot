@@ -22,9 +22,6 @@ public protocol AccessibilityDriver: Sendable {
     func value(for id: String) async throws -> String?
     func setValue(_ value: String, for id: String) async throws
     
-    // Cache Management
-    func clearElementCache(for window: WindowHandle?) async
-    
     // Event Monitoring
     func observeEvents(for window: WindowHandle, mask: AXMask) async -> AsyncStream<AXEvent>
     func checkPermission() async -> Bool
@@ -37,22 +34,17 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
     private var handleCounter = 0
     private var appHandles: [String: AppHandleData] = [:]
     private var windowHandles: [String: WindowHandleData] = [:]
-    // Element ID to WindowHandle reverse index for fast lookup
-    private var elementIdToWindow: [String: WindowHandle] = [:]
-    // Element caching is now handled by AXUI's ID system
     
     private struct AppHandleData {
         let handle: AppHandle
         let app: NSRunningApplication
         let axApp: AXUIElement
-        let createdAt: Date
     }
     
     private struct WindowHandleData {
         let handle: WindowHandle
         let appHandle: AppHandle
         let axWindow: AXUIElement
-        let createdAt: Date
     }
     
     public init() {}
@@ -193,10 +185,6 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
         // Convert AXElements to AIElements with improved filtering
         let aiElements = convertAXElementsToAIElements(axElements, windowHandle: windowHandle)
         
-        // Build reverse index: element ID -> window handle for fast lookup
-        for element in aiElements {
-            elementIdToWindow[element.id] = windowHandle
-        }
         
         // Convert Role to AXUI.Role for filtering
         let axuiRole: AXUI.Role? = role.flatMap { roleToAXUIRole($0) }
@@ -253,8 +241,7 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
         appHandles[handle.id] = AppHandleData(
             handle: handle,
             app: app,
-            axApp: axApp,
-            createdAt: Date()
+            axApp: axApp
         )
         
         return handle
@@ -274,8 +261,7 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
         windowHandles[handle.id] = WindowHandleData(
             handle: handle,
             appHandle: appHandle,
-            axWindow: axWindow,
-            createdAt: Date()
+            axWindow: axWindow
         )
         
         return handle
@@ -562,31 +548,7 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
     // MARK: - ID-based Element Lookup
     
     private func findElement(by elementId: String) async throws -> AXElement? {
-        // Fast path: use reverse index if available
-        if let windowHandle = elementIdToWindow[elementId] {
-            guard let windowData = windowHandles[windowHandle.id],
-                  let appData = appHandles[windowData.appHandle.id],
-                  let bundleId = appData.app.bundleIdentifier else {
-                return nil
-            }
-            
-            do {
-                let windowIndex = try await getWindowIndex(for: windowHandle)
-                let elements = try AXDumper.dumpWindow(
-                    bundleIdentifier: bundleId,
-                    windowIndex: windowIndex,
-                    includeZeroSize: false
-                )
-                
-                if let element = elements.first(where: { $0.id == elementId }) {
-                    return element
-                }
-            } catch {
-                // If fast path fails, fall back to full search
-            }
-        }
-        
-        // Slow path: search through all applications and windows (fallback)
+        // Search through all windows for the element
         for (_, windowData) in windowHandles {
             do {
                 let bundleId = appHandles[windowData.appHandle.id]?.app.bundleIdentifier ?? ""
@@ -601,8 +563,6 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
                 
                 // Find element with matching ID
                 if let element = elements.first(where: { $0.id == elementId }) {
-                    // Update reverse index for future lookups
-                    elementIdToWindow[elementId] = windowData.handle
                     return element
                 }
             } catch {
@@ -699,19 +659,6 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
     }
     
     
-    // MARK: - Cache Management
-    
-    public func clearElementCache(for window: WindowHandle?) async {
-        if let window = window {
-            // Clear reverse index entries for the specific window
-            elementIdToWindow = elementIdToWindow.filter { $1 != window }
-        } else {
-            // Clear all reverse index entries
-            elementIdToWindow.removeAll()
-        }
-        // Element caching is now handled by AXUI internally
-        // AXUI manages element lifecycle through its ID system
-    }
     
     
     // MARK: - Event Monitoring

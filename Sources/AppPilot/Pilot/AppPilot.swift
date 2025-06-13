@@ -1320,17 +1320,6 @@ public actor AppPilot {
         return ActionResult(success: true)
     }
     
-    // MARK: - Cache Management
-    
-    /// Clear element cache for a specific window or all windows
-    /// 
-    /// Clears cached UI element information to force fresh discovery.
-    /// This is useful when the UI has changed and cached elements may be stale.
-    /// 
-    /// - Parameter window: The window to clear cache for, or `nil` to clear all cache
-    public func clearElementCache(for window: WindowHandle? = nil) async {
-        await accessibilityDriver.clearElementCache(for: window)
-    }
     
     // MARK: - Helper Methods
     

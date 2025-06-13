@@ -415,8 +415,6 @@ public enum WaitSpec {
 #### 1. UI Element Discovery System
 - **AX Tree Traversal**: Recursively walk accessibility tree to find elements
 - **Smart Filtering**: Match elements by role, title, identifier, and other attributes
-- **Caching**: Cache element trees for performance with TTL expiration
-- **Auto-refresh**: Refresh element cache when UI changes detected
 
 #### 2. Element-Based Automation
 ```swift
@@ -448,7 +446,7 @@ func findElements(
     identifier: String? = nil
 ) async throws -> [UIElement] {
     
-    // Get cached or fresh AX tree
+    // Get AX tree
     let axTree = try await getAccessibilityTree(for: window)
     
     // Parse tree and filter elements
@@ -623,7 +621,7 @@ print("Result: \(resultText ?? "No value")")
 - **Performance Overhead**: Element discovery requires AX tree traversal
 - **Cursor Movement**: All operations move the cursor visibly
 - **Foreground Only**: Windows must be visible and unminimized
-- **Element Changes**: UI updates may invalidate cached elements
+- **Element Changes**: UI updates may require re-discovery of elements
 
 #### 🚫 Removed Features (from v2.0)
 - Pure coordinate-only automation (now fallback only)
