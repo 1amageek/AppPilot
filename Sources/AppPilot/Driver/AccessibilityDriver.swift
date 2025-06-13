@@ -2,6 +2,7 @@ import Foundation
 import ApplicationServices
 import AppKit
 import AXUI
+import CryptoKit
 
 // MARK: - Accessibility Driver Protocol
 
@@ -281,6 +282,12 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
     }
     
     private func createConsistentWindowID(for axWindow: AXUIElement, appHandle: AppHandle) throws -> String {
+        // First try to get AX identifier if available (most stable)
+        if let axIdentifier = getStringAttribute(from: axWindow, attribute: kAXIdentifierAttribute),
+           !axIdentifier.isEmpty {
+            return "win_ax_\(axIdentifier)"
+        }
+        
         // Try to get window title for consistency
         let title = getStringAttribute(from: axWindow, attribute: kAXTitleAttribute) ?? "NoTitle"
         
@@ -306,9 +313,21 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
         
         let combinedString = components.joined(separator: "_")
         
-        // Create a hash for a shorter, consistent ID
-        let hash = combinedString.hash
-        return "win_\(String(format: "%08X", abs(hash)))"
+        // Use SHA256 for stable, consistent hashing across app restarts
+        let stableHash = createStableHash(from: combinedString)
+        return "win_\(stableHash)"
+    }
+    
+    /// Create a stable hash that doesn't change between app restarts
+    private func createStableHash(from input: String) -> String {
+        let data = Data(input.utf8)
+        let digest = SHA256.hash(data: data)
+        
+        // Take first 8 bytes of SHA256 hash and convert to hex
+        let hashBytes = digest.prefix(8)
+        let hexString = hashBytes.map { String(format: "%02X", $0) }.joined()
+        
+        return hexString
     }
     
     private func getPositionAttribute(from element: AXUIElement) -> CGPoint? {
@@ -392,7 +411,7 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
     
     public func value(for id: String) async throws -> String? {
         // Find element by ID using AXUI
-        guard let element = try await findElementById(id) else {
+        guard let element = try await findElement(by: id) else {
             throw PilotError.elementNotAccessible(id)
         }
         
@@ -405,7 +424,7 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
         // Since AXUI's axElementRef is internal, we need to re-search for the element
         // using the traditional AX tree traversal approach for live operations
         
-        guard let element = try await findElementById(id) else {
+        guard let element = try await findElement(by: id) else {
             throw PilotError.elementNotAccessible(id)
         }
         
@@ -437,7 +456,7 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
     
     public func elementExists(with id: String) async throws -> Bool {
         // Use AXUI to check if element exists by ID
-        return (try await findElementById(id)) != nil
+        return (try await findElement(by: id)) != nil
     }
     
     // MARK: - Helper Methods for Improved Element Discovery
@@ -542,7 +561,7 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
     
     // MARK: - ID-based Element Lookup
     
-    private func findElementById(_ elementId: String) async throws -> AXElement? {
+    private func findElement(by elementId: String) async throws -> AXElement? {
         // Fast path: use reverse index if available
         if let windowHandle = elementIdToWindow[elementId] {
             guard let windowData = windowHandles[windowHandle.id],
@@ -705,13 +724,15 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
                     return
                 }
                 
+                #if DEBUG
+                // DEBUG: Simplified event monitoring implementation
+                // For now, generate mock events based on the mask
+                // TODO: Replace with real AXObserver implementation
+                
                 // Create AXObserver for the application (for future real implementation)
                 let _ = appHandles[windowData.appHandle.id]!
                 
-                // Simplified event monitoring implementation
-                // For now, generate mock events based on the mask
-                
-                // Schedule event generation
+                // Schedule mock event generation
                 Task {
                     for eventType in [AXEvent.EventType.created, .moved, .resized, .titleChanged, .focusChanged, .valueChanged] {
                         // Check if this event type is requested in the mask
@@ -742,6 +763,20 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
                     // Finish after generating sample events
                     continuation.finish()
                 }
+                #else
+                // PRODUCTION: Real AXObserver implementation
+                // TODO: Implement real accessibility event monitoring using AXObserver
+                
+                guard let appData = appHandles[windowData.appHandle.id] else {
+                    continuation.finish()
+                    return
+                }
+                
+                // For now, finish immediately in production builds
+                // Real implementation would set up AXObserver with proper callbacks
+                print("Event monitoring not yet implemented for production builds")
+                continuation.finish()
+                #endif
             }
         }
     }

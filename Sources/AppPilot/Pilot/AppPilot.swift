@@ -218,7 +218,7 @@ public actor AppPilot {
         }
         
         // Find element to check if it's a text input
-        guard let element = try await findElementByID(elementID) else {
+        guard let element = try await findElement(by: elementID) else {
             throw PilotError.elementNotAccessible(elementID)
         }
         
@@ -265,7 +265,7 @@ public actor AppPilot {
         }
         
         // Find element to get its bounds
-        guard let element = try await findElementByID(elementID) else {
+        guard let element = try await findElement(by: elementID) else {
             throw PilotError.elementNotAccessible(elementID)
         }
         
@@ -322,7 +322,7 @@ public actor AppPilot {
         }
         
         // Find element to check if it supports value setting
-        guard let element = try await findElementByID(elementID) else {
+        guard let element = try await findElement(by: elementID) else {
             throw PilotError.elementNotAccessible(elementID)
         }
         
@@ -856,7 +856,7 @@ public actor AppPilot {
         }
         
         // Find element to check if it's a text input
-        guard let element = try await findElementByID(elementID) else {
+        guard let element = try await findElement(by: elementID) else {
             throw PilotError.elementNotAccessible(elementID)
         }
         
@@ -917,7 +917,7 @@ public actor AppPilot {
         for elementID: String
     ) async throws -> ActionResult {
         // Find element for result data
-        guard let element = try await findElementByID(elementID) else {
+        guard let element = try await findElement(by: elementID) else {
             throw PilotError.elementNotAccessible(elementID)
         }
         
@@ -958,7 +958,7 @@ public actor AppPilot {
         for elementID: String
     ) async throws -> ActionResult {
         // Find element for result data
-        guard let element = try await findElementByID(elementID) else {
+        guard let element = try await findElement(by: elementID) else {
             throw PilotError.elementNotAccessible(elementID)
         }
         
@@ -1003,7 +1003,7 @@ public actor AppPilot {
         for elementID: String
     ) async throws -> ActionResult {
         // Find element for result data
-        guard let element = try await findElementByID(elementID) else {
+        guard let element = try await findElement(by: elementID) else {
             throw PilotError.elementNotAccessible(elementID)
         }
         
@@ -1154,11 +1154,12 @@ public actor AppPilot {
         }
         
         // Direct window capture using desktopIndependentWindow
-        // Find the SCWindow ID that matches our WindowInfo
+        // Find the SCWindow ID that matches our WindowInfo (includes Mission Control windows)
         guard let windowID = try await screenDriver.findWindowID(
             title: windowInfo.title,
             bundleIdentifier: app.bundleIdentifier,
-            bounds: windowInfo.bounds
+            bounds: windowInfo.bounds,
+            onScreenOnly: false
         ) else {
             throw PilotError.windowNotFound(window)
         }
@@ -1289,7 +1290,7 @@ public actor AppPilot {
     /// Click on a specific UI element by ID
     public func clickElement(elementID: String, in window: WindowHandle) async throws -> ActionResult {
         // Get element info for logging and center point calculation
-        guard let element = try await findElementByID(elementID) else {
+        guard let element = try await findElement(by: elementID) else {
             throw PilotError.elementNotAccessible(elementID)
         }
         
@@ -1334,7 +1335,7 @@ public actor AppPilot {
     // MARK: - Helper Methods
     
     /// Find element by ID across all windows
-    private func findElementByID(_ elementID: String) async throws -> AIElement? {
+    private func findElement(by elementID: String) async throws -> AIElement? {
         // Search through all applications and windows to find element with matching ID
         let apps = try await listApplications()
         

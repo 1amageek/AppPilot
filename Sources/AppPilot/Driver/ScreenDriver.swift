@@ -21,11 +21,12 @@ public protocol ScreenDriver: Sendable {
     func captureWindow(windowID: UInt32)          async throws -> CGImage
     func findWindowID(title: String?,
                       bundleIdentifier: String?,
-                      bounds: CGRect)            async throws -> UInt32?
+                      bounds: CGRect,
+                      onScreenOnly: Bool)        async throws -> UInt32?
     func captureRegion(_ region: CGRect)          async throws -> CGImage
     func checkScreenRecordingPermission()         async -> Bool
     func requestScreenRecordingPermission()       async throws
-    func getShareableContent()                    async throws -> SCShareableContent
+    func getShareableContent(onScreenWindowsOnly: Bool) async throws -> SCShareableContent
 }
 
 // MARK: - Utility
@@ -91,7 +92,7 @@ public actor DefaultScreenDriver: ScreenDriver {
     // MARK: Public API
     public func captureScreen() async throws -> CGImage {
         try await ensurePermission()
-        let content     = try await getShareableContentInternal()
+        let content     = try await getShareableContentInternal(onScreenWindowsOnly: false)
         guard let display = content.displays.first else {
             throw ScreenCaptureError.noDisplayFound
         }
@@ -110,14 +111,14 @@ public actor DefaultScreenDriver: ScreenDriver {
     
     public func captureApplication(bundleId: String) async throws -> CGImage {
         try await ensurePermission()
-        let content = try await getShareableContentInternal()
+        let content = try await getShareableContentInternal(onScreenWindowsOnly: false)
         
         guard let app = content.applications
             .first(where: { $0.bundleIdentifier == bundleId })
         else { throw ScreenCaptureError.applicationNotFound(bundleId) }
         
         let appWindows = content.windows
-            .filter { $0.owningApplication?.bundleIdentifier == bundleId && $0.isOnScreen }
+            .filter { $0.owningApplication?.bundleIdentifier == bundleId }
         guard !appWindows.isEmpty else {
             throw ScreenCaptureError.noWindowsFound(bundleId)
         }
@@ -146,14 +147,14 @@ public actor DefaultScreenDriver: ScreenDriver {
     
     public func captureWindow(windowID: UInt32) async throws -> CGImage {
         try await ensurePermission()
-        let content = try await getShareableContentInternal()
+        let content = try await getShareableContentInternal(onScreenWindowsOnly: false)
         
         guard let targetWindow = content.windows
             .first(where: { $0.windowID == windowID })
         else { throw ScreenCaptureError.noWindowsFound("windowID: \(windowID)") }
         
         // Build SCContentFilter on the main actor to avoid CGS_REQUIRE_INIT
-        let filter = try await MainActor.run {
+        let filter = await MainActor.run {
             SCContentFilter(desktopIndependentWindow: targetWindow)
         }
         
@@ -169,8 +170,9 @@ public actor DefaultScreenDriver: ScreenDriver {
     
     public func findWindowID(title: String?,
                              bundleIdentifier: String?,
-                             bounds: CGRect) async throws -> UInt32? {
-        let content = try await getShareableContentInternal()
+                             bounds: CGRect,
+                             onScreenOnly: Bool) async throws -> UInt32? {
+        let content = try await getShareableContentInternal(onScreenWindowsOnly: onScreenOnly)
         return content.windows
             .first(where: { w in
                 (title == nil  || w.title == title) &&
@@ -182,7 +184,7 @@ public actor DefaultScreenDriver: ScreenDriver {
     
     public func captureRegion(_ region: CGRect) async throws -> CGImage {
         try await ensurePermission()
-        let content          = try await getShareableContentInternal()
+        let content          = try await getShareableContentInternal(onScreenWindowsOnly: false)
         guard let display    = content.displays.first else {
             throw ScreenCaptureError.noDisplayFound
         }
@@ -222,8 +224,8 @@ public actor DefaultScreenDriver: ScreenDriver {
         throw ScreenCaptureError.permissionDenied
     }
     
-    public func getShareableContent() async throws -> SCShareableContent {
-        try await getShareableContentInternal()
+    public func getShareableContent(onScreenWindowsOnly: Bool) async throws -> SCShareableContent {
+        try await getShareableContentInternal(onScreenWindowsOnly: onScreenWindowsOnly)
     }
     
     // MARK: - Private Helpers
@@ -246,10 +248,10 @@ public actor DefaultScreenDriver: ScreenDriver {
         }
     }
     
-    private func getShareableContentInternal() async throws -> SCShareableContent {
+    private func getShareableContentInternal(onScreenWindowsOnly: Bool) async throws -> SCShareableContent {
         do {
             return try await SCShareableContent
-                .excludingDesktopWindows(false, onScreenWindowsOnly: true)
+                .excludingDesktopWindows(false, onScreenWindowsOnly: onScreenWindowsOnly)
         } catch {
             throw ScreenCaptureError.screenCaptureKitUnavailable
         }
