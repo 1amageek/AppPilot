@@ -84,7 +84,7 @@ struct SetValueUnitTests {
             
             // Verify element can theoretically support setValue
             #expect(element.isEnabled, "Element should be enabled")
-            #expect(role.rawValue.isTextInputRole, "Element role should support text input")
+            #expect(Role(rawValue: role.rawValue)?.isTextInput ?? false, "Element role should support text input")
         }
         
         // Test unsupported roles
@@ -121,7 +121,7 @@ struct SetValueUnitTests {
         ]
         
         for (role, expectedIsTextInput) in textInputRoles {
-            #expect(role.isTextInputRole == expectedIsTextInput, 
+            #expect(Role(rawValue: role)?.isTextInput == expectedIsTextInput, 
                    "\(role) isTextInput should be \(expectedIsTextInput)")
         }
     }
@@ -145,7 +145,7 @@ struct SetValueUnitTests {
         )
         
         #expect(validTextField.isEnabled, "Valid text field should be enabled")
-        #expect("Field".isTextInputRole, "Valid text field should support text input")
+        #expect(Role(rawValue: "Field")?.isTextInput ?? false, "Valid text field should support text input")
         #expect((validTextField.size?.width ?? 0) > 0, "Valid text field should have positive width")
         #expect((validTextField.size?.height ?? 0) > 0, "Valid text field should have positive height")
         
@@ -164,7 +164,7 @@ struct SetValueUnitTests {
         )
         
         #expect(!disabledTextField.isEnabled, "Disabled text field should not be enabled")
-        #expect("Field".isTextInputRole, "Disabled text field should still be text input type")
+        #expect(Role(rawValue: "Field")?.isTextInput ?? false, "Disabled text field should still be text input type")
         
         // Test non-text element
         let buttonElement = AXElement(
@@ -181,7 +181,7 @@ struct SetValueUnitTests {
         )
         
         #expect(buttonElement.isEnabled, "Button should be enabled")
-        #expect(!"Button".isTextInputRole, "Button should not support text input")
+        #expect(!(Role(rawValue: "Button")?.isTextInput ?? false), "Button should not support text input")
     }
     
     // MARK: - Error Type Tests
@@ -242,7 +242,7 @@ struct SetValueUnitTests {
         // Mock validation logic
         func validateElementForSetValue(_ element: AXElement) -> Bool {
             guard let role = element.role else { return false }
-            return element.isEnabled && (role.rawValue.isTextInputRole || role == .check || role == .slider)
+            return element.isEnabled && (Role(rawValue: role.rawValue)?.isTextInput == true || role == .check || role == .slider)
         }
         
         #expect(validateElementForSetValue(validElement), "Valid text field should pass validation")
@@ -427,8 +427,8 @@ struct SetValueUnitTests {
         #expect(element.cgBounds.width > 0, "Element should have valid bounds")
         
         // 3. Role.isTextInput works correctly
-        #expect("Field".isTextInputRole, "field should be text input")
-        #expect(!"Button".isTextInputRole, "button should not be text input")
+        #expect(Role(rawValue: "Field")?.isTextInput ?? false, "field should be text input")
+        #expect(!(Role(rawValue: "Button")?.isTextInput ?? false), "button should not be text input")
         
         // 4. Point calculation works
         let centerPoint = element.centerPoint

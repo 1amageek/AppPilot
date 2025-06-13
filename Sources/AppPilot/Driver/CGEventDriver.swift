@@ -209,8 +209,9 @@ public extension CGEventDriver {
             throw PilotError.osFailure(api: "TISGetInputSourceProperty", code: -1)
         }
         
-        let identifierString = identifier as! CFString as String
-        let nameString = name as! CFString as String
+        // Convert CFTypeRef to CFString and then to String
+        let identifierString = String(Unmanaged<CFString>.fromOpaque(identifier).takeUnretainedValue())
+        let nameString = String(Unmanaged<CFString>.fromOpaque(name).takeUnretainedValue())
         
         return InputSourceInfo(
             identifier: identifierString,
@@ -236,12 +237,12 @@ public extension CGEventDriver {
                 continue
             }
             
-            let identifierString = identifier as! CFString as String
-            let nameString = name as! CFString as String
+            let identifierString = String(Unmanaged<CFString>.fromOpaque(identifier).takeUnretainedValue())
+            let nameString = String(Unmanaged<CFString>.fromOpaque(name).takeUnretainedValue())
             
             // Check if this is a keyboard input source
             if let category = TISGetInputSourceProperty(tisSource, kTISPropertyInputSourceCategory) {
-                let categoryString = category as! CFString as String
+                let categoryString = String(Unmanaged<CFString>.fromOpaque(category).takeUnretainedValue())
                 if categoryString == kTISCategoryKeyboardInputSource as String {
                     inputSources.append(InputSourceInfo(
                         identifier: identifierString,
@@ -274,7 +275,7 @@ public extension CGEventDriver {
             let tisSource = unsafeBitCast(sourceRef, to: TISInputSource.self)
             
             if let identifier = TISGetInputSourceProperty(tisSource, kTISPropertyInputSourceID) {
-                let identifierString = identifier as! CFString as String
+                let identifierString = String(Unmanaged<CFString>.fromOpaque(identifier).takeUnretainedValue())
                 if identifierString == source.rawValue {
                     let result = TISSelectInputSource(tisSource)
                     if result != noErr {

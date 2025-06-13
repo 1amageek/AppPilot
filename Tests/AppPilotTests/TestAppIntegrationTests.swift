@@ -956,8 +956,24 @@ struct TestAppIntegrationTests {
         // Stage 3: アクション (Action) - Test core operations
         print("\n🎬 Stage 3: アクション (Test Core SDK Operations)")
         
-        // Skip screenshot capture due to CGS_REQUIRE_INIT issue in test environment
-        print("📷 Screenshot capture skipped (CGS_REQUIRE_INIT issue in test environment)")
+        // Test screenshot capture with proper error handling
+        print("📷 Testing screenshot capture...")
+        
+        do {
+            let screenshot = try await pilot.capture(window: mainWindow.id)
+            print("✅ Screenshot capture successful: \(screenshot.width)x\(screenshot.height)")
+            #expect(screenshot.width > 0 && screenshot.height > 0, "Screenshot should have valid dimensions")
+        } catch {
+            if error.localizedDescription.contains("CGS_REQUIRE_INIT") {
+                print("⚠️ Screenshot capture skipped due to test environment limitation (CGS_REQUIRE_INIT)")
+                print("📝 Note: This is expected in test environment - screenshot capture works in real applications")
+                // Don't fail the test for this known limitation
+            } else {
+                print("❌ Screenshot capture failed with unexpected error: \(error)")
+                // For unexpected errors, we should still fail
+                throw error
+            }
+        }
         
         // Test clicking operation (if buttons available)
         if let clickableButton = buttons.first {
@@ -1095,13 +1111,9 @@ struct TestAppIntegrationTests {
         // Stage 3: アクション (Action) - Test session operations
         print("\n🎬 Stage 3: アクション (Test Session Operations)")
         
-        // Perform some clicks to change state
+        // Perform some clicks to change state using dynamic element discovery
         let allElements = try await pilot.findElements(in: testSession1.window.id)
-        let clickTargets = allElements.filter { element in
-            element.role?.rawValue == "RadioButton" && 
-            element.centerPoint.y > 290 && element.centerPoint.y < 295 &&
-            element.centerPoint.x > 700
-        }
+        let clickTargets = findClickTargetsMultipleStrategies(elements: allElements)
         
         if let firstTarget = clickTargets.first {
             print("🖱️ Clicking first target to change state...")
@@ -1193,7 +1205,8 @@ struct TestAppIntegrationTests {
         let foundWindowID = try await screenDriver.findWindowID(
             title: mainWindow.title,
             bundleIdentifier: appInfo?.bundleIdentifier,
-            bounds: mainWindow.bounds
+            bounds: mainWindow.bounds,
+            onScreenOnly: true
         )
         print("   Found WindowID: \(foundWindowID?.description ?? "nil")")
         
@@ -1281,7 +1294,8 @@ struct TestAppIntegrationTests {
                 let windowID = try await screenDriver.findWindowID(
                     title: mainWindow.title,
                     bundleIdentifier: "com.example.TestApp",
-                    bounds: mainWindow.bounds
+                    bounds: mainWindow.bounds,
+                    onScreenOnly: true
                 )
                 
                 if let windowID = windowID {
@@ -1396,11 +1410,16 @@ struct TestAppIntegrationTests {
     
     /// ⭐ Enhanced click target discovery with multiple strategies
     private func findClickTargetsMultipleStrategies(elements: [AIElement]) -> [AIElement] {
-        // Strategy 1: Find by accessibility identifier
+        // Strategy 1: Find by accessibility identifier patterns
         let targetsByIdentifier = elements.filter { element in
             guard let identifier = element.identifier else { return false }
-            return identifier.hasPrefix("click_target_") && 
-                   (element.role?.rawValue == "Button" || element.role?.rawValue == "Group" || element.role?.rawValue == "Unknown")
+            return (identifier.hasPrefix("click_target_") || 
+                   identifier.hasPrefix("target_") ||
+                   identifier.contains("clickable")) && 
+                   (element.role?.rawValue == "Button" || 
+                    element.role?.rawValue == "Group" || 
+                    element.role?.rawValue == "Unknown" ||
+                    element.role?.rawValue == "RadioButton")
         }
         
         if !targetsByIdentifier.isEmpty {
@@ -1408,11 +1427,17 @@ struct TestAppIntegrationTests {
             return targetsByIdentifier
         }
         
-        // Strategy 2: Find by accessibility label
+        // Strategy 2: Find by accessibility label patterns
         let targetsByLabel = elements.filter { element in
             guard let title = element.title else { return false }
-            return title.contains("Click target") && 
-                   (element.role?.rawValue == "Button" || element.role?.rawValue == "Group" || element.role?.rawValue == "Unknown")
+            let titleLower = title.lowercased()
+            return (titleLower.contains("click") || 
+                   titleLower.contains("target") ||
+                   titleLower.contains("button")) && 
+                   (element.role?.rawValue == "Button" || 
+                    element.role?.rawValue == "Group" || 
+                    element.role?.rawValue == "Unknown" ||
+                    element.role?.rawValue == "RadioButton")
         }
         
         if !targetsByLabel.isEmpty {
@@ -1420,25 +1445,61 @@ struct TestAppIntegrationTests {
             return targetsByLabel
         }
         
-        // Strategy 3: Find in test area by position and characteristics
-        let testAreaTargets = elements.filter { element in
-            let isInTestArea = element.centerPoint.x > 600 && element.centerPoint.x < 1200 &&
-                              element.centerPoint.y > 100 && element.centerPoint.y < 600
-            
-            let isInteractive = element.role?.rawValue == "Button" || 
-                               element.role?.rawValue == "Group" || 
-                               element.role?.rawValue == "Unknown" ||
-                               element.role?.rawValue == "RadioButton" ||
-                               element.isEnabled
-            
-            let hasReasonableSize = element.cgBounds.width > 50 && element.cgBounds.width < 200 &&
-                                   element.cgBounds.height > 50 && element.cgBounds.height < 200
-            
-            return isInTestArea && isInteractive && hasReasonableSize
+        // Strategy 3: Find radio buttons in the right area (dynamic positioning)
+        // Get window bounds to calculate relative positions
+        let allElements = elements
+        let windowBounds = allElements.map { $0.cgBounds }.reduce(CGRect.zero) { result, bounds in
+            result.union(bounds)
         }
         
-        print("📍 Found targets by position: \(testAreaTargets.count)")
-        return testAreaTargets
+        let rightPanelTargets = elements.filter { element in
+            // Look for elements in the right portion of the window
+            let isInRightPanel = element.centerPoint.x > windowBounds.midX
+            
+            let isClickableType = element.role?.rawValue == "RadioButton" || 
+                                 element.role?.rawValue == "Button" ||
+                                 element.role?.rawValue == "Group" ||
+                                 element.role?.rawValue == "Unknown"
+            
+            let hasReasonableSize = element.cgBounds.width > 30 && element.cgBounds.width < 300 &&
+                                   element.cgBounds.height > 30 && element.cgBounds.height < 300
+            
+            let isInteractive = element.isEnabled
+            
+            return isInRightPanel && isClickableType && hasReasonableSize && isInteractive
+        }
+        
+        if !rightPanelTargets.isEmpty {
+            print("📍 Found targets in right panel: \(rightPanelTargets.count)")
+            return rightPanelTargets
+        }
+        
+        // Strategy 4: Find any interactive elements that could be test targets
+        let interactiveTargets = elements.filter { element in
+            let isClickableRole = element.role?.rawValue == "RadioButton" || 
+                                 element.role?.rawValue == "Button" ||
+                                 element.role?.rawValue == "Group" ||
+                                 element.role?.rawValue == "Unknown" ||
+                                 element.role?.rawValue == "Cell"
+            
+            let hasReasonableSize = element.cgBounds.width > 20 && element.cgBounds.width < 400 &&
+                                   element.cgBounds.height > 20 && element.cgBounds.height < 400
+            
+            let isEnabled = element.isEnabled
+            
+            // Exclude obvious UI elements like close buttons, title bars, etc.
+            let isNotUIChrome = !(element.title?.contains("Close") ?? false) &&
+                               !(element.title?.contains("Minimize") ?? false) &&
+                               !(element.title?.contains("Maximize") ?? false)
+            
+            return isClickableRole && hasReasonableSize && isEnabled && isNotUIChrome
+        }
+        
+        // Sort by Y position to get consistent ordering
+        let sortedTargets = interactiveTargets.sorted { $0.centerPoint.y < $1.centerPoint.y }
+        
+        print("📍 Found interactive targets (sorted by position): \(sortedTargets.count)")
+        return sortedTargets
     }
     
     /// ⭐ Enhanced coordinate-based fallback testing
@@ -1451,16 +1512,23 @@ struct TestAppIntegrationTests {
         
         print("🔍 Performing coordinate-based fallback testing...")
         
+        // Use dynamic positioning based on window bounds instead of hardcoded coordinates
         let potentialClickTargets = elements.filter { element in
-            let isInRightArea = element.centerPoint.x > (currentWindow.bounds.minX + 400)
-            let hasReasonableSize = element.cgBounds.width > 50 && element.cgBounds.width < 200 &&
-                                   element.cgBounds.height > 50 && element.cgBounds.height < 200
+            // Look for elements in the right portion of the window (test area)
+            let isInTestArea = element.centerPoint.x > currentWindow.bounds.midX
+            
+            let hasReasonableSize = element.cgBounds.width > 30 && element.cgBounds.width < 300 &&
+                                   element.cgBounds.height > 30 && element.cgBounds.height < 300
+            
             let isClickable = element.role?.rawValue == "Button" || 
                              element.role?.rawValue == "Group" || 
                              element.role?.rawValue == "Unknown" ||
-                             element.role?.rawValue == "RadioButton"
+                             element.role?.rawValue == "RadioButton" ||
+                             element.role?.rawValue == "Cell"
             
-            return isInRightArea && hasReasonableSize && isClickable
+            let isEnabled = element.isEnabled
+            
+            return isInTestArea && hasReasonableSize && isClickable && isEnabled
         }
         
         print("🎯 Found \(potentialClickTargets.count) potential click targets in test area")

@@ -71,7 +71,22 @@ actor TestSession {
             print("   Window \(index + 1): '\(window.title ?? "No title")' bounds: \(window.bounds)")
         }
         
-        guard let window = windows.first else {
+        // Select the best window (prefer windows with titles and reasonable size)
+        let sortedWindows = windows.sorted { window1, window2 in
+            // Prefer windows with titles
+            let window1HasTitle = window1.title?.isEmpty == false
+            let window2HasTitle = window2.title?.isEmpty == false
+            if window1HasTitle != window2HasTitle {
+                return window1HasTitle
+            }
+            
+            // Prefer larger windows (more likely to be main window)
+            let window1Size = window1.bounds.width * window1.bounds.height
+            let window2Size = window2.bounds.width * window2.bounds.height
+            return window1Size > window2Size
+        }
+        
+        guard let window = sortedWindows.first else {
             print("❌ No windows found for TestApp")
             throw TestSessionError.noWindowsFound
         }
@@ -160,24 +175,13 @@ actor TestSession {
     func navigateToTab() async throws {
         print("🧭 Navigating to \(testType) tab...")
         
-        // Map test types to expected image identifiers (from debug output)
-        let imageIdentifier: String
-        switch testType {
-        case .mouseClick:
-            imageIdentifier = "cursorarrow.click"
-        case .keyboard:
-            imageIdentifier = "keyboard"
-        case .wait:
-            imageIdentifier = "clock"
-        }
-        
-        // Debug: List all elements to understand the structure
+        // Get all elements for dynamic analysis
         let allElements = try await pilot.findElements(in: window.id)
-        let imageElements = allElements.filter { element in
-            element.role?.rawValue == "Image"
-        }
         let rowElements = allElements.filter { element in
             element.role?.rawValue == "Row"
+        }
+        let imageElements = allElements.filter { element in
+            element.role?.rawValue == "Image"
         }
         
         print("🔍 Found \(imageElements.count) image elements:")
@@ -191,90 +195,106 @@ actor TestSession {
             print("   - Row: bounds=(\(String(format: "%.0f", bounds.minX)), \(String(format: "%.0f", bounds.minY)), \(String(format: "%.0f", bounds.width))x\(String(format: "%.0f", bounds.height)))")
         }
         
-        // Strategy 1: Find the target image by identifier
-        var targetIcon: AIElement?
-        
-        // Find the specific image with matching identifier
-        let imagesByIdentifier = imageElements.filter { $0.identifier == imageIdentifier }
-        if let foundImage = imagesByIdentifier.first {
-            targetIcon = foundImage
-            print("🎯 Found target image by identifier: '\(imageIdentifier)' at (\(String(format: "%.1f", foundImage.centerPoint.x)), \(String(format: "%.1f", foundImage.centerPoint.y)))")
-        } else {
-            print("⚠️ Image with identifier '\(imageIdentifier)' not found")
-            
-            // Strategy 2: Fallback - try to find by row containing the image
-            print("🔄 Trying fallback strategy: search by row...")
-            
-            // Look for rows that might contain our target
-            for row in rowElements {
-                // Get all elements within this row's bounds
-                let elementsInRow = allElements.filter { element in
-                    row.cgBounds.contains(CGPoint(x: element.centerPoint.x, y: element.centerPoint.y))
-                }
-                
-                // Check if any image in this row has our target identifier
-                let imagesInRow = elementsInRow.filter { element in
-                    element.role?.rawValue == "Image"
-                }
-                let hasTargetImage = imagesInRow.contains { element in
-                    element.identifier == imageIdentifier
-                }
-                
-                if hasTargetImage {
-                    print("🎯 Found row containing target image, clicking row instead")
-                    let result = try await pilot.click(elementID: row.id)
-                    
-                    if result.success {
-                        print("✅ Navigation successful via row click")
-                        try await Task.sleep(nanoseconds: 500_000_000) // 500ms for UI update
-                        try await refreshWindow()
-                        return
-                    }
-                }
-            }
-            
-            throw TestSessionError.navigationFailed
+        // Strategy 1: Find target row by position and test type
+        let targetRowIndex: Int
+        switch testType {
+        case .mouseClick:
+            targetRowIndex = 0  // First row (mouse/click icon)
+        case .keyboard:
+            targetRowIndex = 1  // Second row (keyboard icon)
+        case .wait:
+            targetRowIndex = 2  // Third row (clock icon)
         }
         
-        // Strategy 3: Click the target image directly
-        if let icon = targetIcon {
-            print("🔄 Clicking target image directly")
-            let result = try await pilot.click(elementID: icon.id)
+        // Strategy 2: Find sidebar rows in left panel (assuming standard layout)
+        let sidebarRows = rowElements.filter { row in
+            // Sidebar rows are typically in the left portion and have reasonable height
+            let bounds = row.cgBounds
+            let isInLeftPanel = bounds.minX < window.bounds.midX
+            let hasReasonableHeight = bounds.height > 30 && bounds.height < 100
+            let hasReasonableWidth = bounds.width > 100
+            
+            return isInLeftPanel && hasReasonableHeight && hasReasonableWidth
+        }.sorted { $0.cgBounds.minY < $1.cgBounds.minY }  // Sort by Y position (top to bottom)
+        
+        print("🎯 Found \(sidebarRows.count) sidebar rows (sorted by position)")
+        for (index, row) in sidebarRows.enumerated() {
+            let bounds = row.cgBounds
+            print("   Row \(index): bounds=(\(String(format: "%.0f", bounds.minX)), \(String(format: "%.0f", bounds.minY)), \(String(format: "%.0f", bounds.width))x\(String(format: "%.0f", bounds.height)))")
+        }
+        
+        // Strategy 3: Click the appropriate row
+        if targetRowIndex < sidebarRows.count {
+            let targetRow = sidebarRows[targetRowIndex]
+            print("🎯 Clicking target row \(targetRowIndex) for \(testType)")
+            
+            let result = try await pilot.click(elementID: targetRow.id)
             
             if result.success {
-                print("✅ Navigation successful via direct image click")
-                try await Task.sleep(nanoseconds: 500_000_000) // 500ms for UI update
+                print("✅ Navigation successful via row \(targetRowIndex) click")
+                try await Task.sleep(nanoseconds: 800_000_000) // 800ms for UI update
                 try await refreshWindow()
+                return
             } else {
-                print("❌ Direct image click failed, trying parent row")
-                
-                // Strategy 4: Fallback to parent row click
-                print("🔍 Searching for parent row containing the target image...")
-                
-                for row in rowElements {
-                    // Check if the image is within this row's bounds
-                    if row.cgBounds.contains(CGPoint(x: icon.centerPoint.x, y: icon.centerPoint.y)) {
-                        print("🎯 Found parent row, clicking row as fallback")
-                        do {
-                            let result = try await pilot.click(elementID: row.id)
-                            
-                            if result.success {
-                                print("✅ Navigation successful via parent row click")
-                                try await Task.sleep(nanoseconds: 500_000_000) // 500ms for UI update
-                                try await refreshWindow()
-                                return
-                            }
-                        } catch {
-                            print("⚠️ Row click failed: \(error)")
-                            continue
-                        }
-                    }
-                }
-                
-                print("❌ All navigation attempts failed")
-                throw TestSessionError.navigationFailed
+                print("⚠️ Row click result was unsuccessful, trying fallback...")
+            }
+        } else {
+            print("⚠️ Not enough sidebar rows found (need \(targetRowIndex + 1), found \(sidebarRows.count))")
+        }
+        
+        // Strategy 4: Fallback - try to find any clickable element in left panel
+        print("🔄 Fallback: Looking for any clickable elements in left panel...")
+        
+        let leftPanelElements = allElements.filter { element in
+            let isInLeftPanel = element.centerPoint.x < window.bounds.midX
+            let isClickable = element.role?.rawValue == "Row" || 
+                             element.role?.rawValue == "Button" || 
+                             element.role?.rawValue == "Cell"
+            let hasReasonableSize = element.cgBounds.width > 50 && element.cgBounds.height > 20
+            
+            return isInLeftPanel && isClickable && hasReasonableSize
+        }.sorted { $0.cgBounds.minY < $1.cgBounds.minY }
+        
+        print("🔍 Found \(leftPanelElements.count) clickable elements in left panel")
+        
+        if targetRowIndex < leftPanelElements.count {
+            let fallbackElement = leftPanelElements[targetRowIndex]
+            print("🎯 Trying fallback element \(targetRowIndex): \(fallbackElement.role?.rawValue ?? "unknown")")
+            
+            let result = try await pilot.click(elementID: fallbackElement.id)
+            
+            if result.success {
+                print("✅ Navigation successful via fallback element click")
+                try await Task.sleep(nanoseconds: 800_000_000) // 800ms for UI update
+                try await refreshWindow()
+                return
             }
         }
+        
+        // Strategy 5: Last resort - try to use image-based navigation by position
+        print("🔄 Last resort: Image-based navigation by position...")
+        
+        // Sort images by Y position to find the right one for our test type
+        let sortedImages = imageElements.filter { img in
+            img.centerPoint.x < window.bounds.midX  // Left side images only
+        }.sorted { $0.centerPoint.y < $1.centerPoint.y }
+        
+        if targetRowIndex < sortedImages.count {
+            let targetImage = sortedImages[targetRowIndex]
+            print("🎯 Trying image \(targetRowIndex): value='\(targetImage.value ?? "unknown")'")
+            
+            let result = try await pilot.click(elementID: targetImage.id)
+            
+            if result.success {
+                print("✅ Navigation successful via image click")
+                try await Task.sleep(nanoseconds: 800_000_000) // 800ms for UI update
+                try await refreshWindow()
+                return
+            }
+        }
+        
+        print("❌ All navigation strategies failed")
+        throw TestSessionError.navigationFailed
     }
 }
 
