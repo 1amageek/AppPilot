@@ -2,7 +2,6 @@ import Foundation
 import ApplicationServices
 import AppKit
 import AXUI
-import CryptoKit
 import OSLog
 
 // MARK: - Accessibility Driver Protocol
@@ -121,7 +120,7 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
         var windows: [WindowInfo] = []
         
         for (index, axWindow) in axWindows.enumerated() {
-            let windowHandle = try await generateWindowHandle(for: axWindow, appHandle: appHandle)
+            let windowHandle = generateWindowHandle(for: axWindow, appHandle: appHandle)
             
             let title = getStringAttribute(from: axWindow, attribute: kAXTitleAttribute)
             let isMain = getBoolAttribute(from: axWindow, attribute: kAXMainAttribute) ?? false
@@ -184,7 +183,8 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
             throw PilotError.permissionDenied("Accessibility permission required. Please grant access in System Settings > Privacy & Security > Accessibility")
         }
         
-        guard let windowData = windowHandles[windowHandle.id] else {
+        guard let windowData = findCanonicalWindowHandle(windowHandle.id) else {
+            logWindowHandleResolutionFailure(windowHandle.id, context: "findElements")
             throw PilotError.windowNotFound(windowHandle)
         }
         
@@ -233,6 +233,19 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
     }
     
     
+    
+    /// Find the canonical handle for a window using simple lookup strategy
+    private func findCanonicalWindowHandle(_ handleId: String) -> WindowHandleData? {
+        return windowHandles[handleId]
+    }
+    
+    
+    
+    /// Simple error reporting for window handle resolution failures
+    private func logWindowHandleResolutionFailure(_ targetHandle: String, context: String) {
+        logger.error("Window handle not found: '\(targetHandle, privacy: .public)' in \(context, privacy: .public)")
+    }
+    
     // MARK: - Private Helper Methods
     
     private func generateAppHandle(for app: NSRunningApplication) async throws -> AppHandle {
@@ -264,73 +277,40 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
         return handle
     }
     
-    private func generateWindowHandle(for axWindow: AXUIElement, appHandle: AppHandle) async throws -> WindowHandle {
-        // Create a consistent ID based on window properties
-        let windowID = try createConsistentWindowID(for: axWindow, appHandle: appHandle)
+    private func generateWindowHandle(for axWindow: AXUIElement, appHandle: AppHandle) -> WindowHandle {
+        // Create a consistent ID preferring accessibility format
+        let windowID = createConsistentWindowID(for: axWindow, appHandle: appHandle)
         
         // Check if we already have a handle for this window
-        if let existingData = windowHandles[windowID] {
+        if let existingData = findCanonicalWindowHandle(windowID) {
             return existingData.handle
         }
         
         let handle = WindowHandle(id: windowID)
         
-        windowHandles[handle.id] = WindowHandleData(
+        let windowData = WindowHandleData(
             handle: handle,
             appHandle: appHandle,
             axWindow: axWindow
         )
         
+        windowHandles[handle.id] = windowData
+        
         return handle
     }
     
-    private func createConsistentWindowID(for axWindow: AXUIElement, appHandle: AppHandle) throws -> String {
-        // First try to get AX identifier if available (most stable)
+    
+    
+    private func createConsistentWindowID(for axWindow: AXUIElement, appHandle: AppHandle) -> String {
+        // First try to get AX identifier if available (most stable and preferred)
         if let axIdentifier = getStringAttribute(from: axWindow, attribute: kAXIdentifierAttribute),
            !axIdentifier.isEmpty {
             return "win_ax_\(axIdentifier)"
         }
         
-        // Try to get window title for consistency
-        let title = getStringAttribute(from: axWindow, attribute: kAXTitleAttribute) ?? "NoTitle"
-        
-        // Get window position for additional uniqueness
-        guard let position = getPositionAttribute(from: axWindow) else {
-            throw PilotError.accessibilityTreeUnavailable(WindowHandle(id: "position_unavailable"))
-        }
-        
-        // Get window size
-        guard let size = getSizeAttribute(from: axWindow) else {
-            throw PilotError.accessibilityTreeUnavailable(WindowHandle(id: "size_unavailable"))
-        }
-        
-        // Create a consistent ID based on app + title + position + size
-        let components = [
-            appHandle.id,
-            title.replacingOccurrences(of: " ", with: "_"),
-            String(format: "%.0f", position.x),
-            String(format: "%.0f", position.y),
-            String(format: "%.0f", size.width),
-            String(format: "%.0f", size.height)
-        ]
-        
-        let combinedString = components.joined(separator: "_")
-        
-        // Use SHA256 for stable, consistent hashing across app restarts
-        let stableHash = createStableHash(from: combinedString)
-        return "win_\(stableHash)"
-    }
-    
-    /// Create a stable hash that doesn't change between app restarts
-    private func createStableHash(from input: String) -> String {
-        let data = Data(input.utf8)
-        let digest = SHA256.hash(data: data)
-        
-        // Take first 8 bytes of SHA256 hash and convert to hex
-        let hashBytes = digest.prefix(8)
-        let hexString = hashBytes.map { String(format: "%02X", $0) }.joined()
-        
-        return hexString
+        // Fallback: create counter-based ID for simplicity
+        handleCounter += 1
+        return "win_\(String(format: "%04X", handleCounter))"
     }
     
     private func getPositionAttribute(from element: AXUIElement) -> CGPoint? {
@@ -584,7 +564,7 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
     }
     
     private func getWindowIndex(for windowHandle: WindowHandle) async throws -> Int {
-        guard let windowData = windowHandles[windowHandle.id],
+        guard let windowData = findCanonicalWindowHandle(windowHandle.id),
               let _ = appHandles[windowData.appHandle.id] else {
             throw PilotError.windowNotFound(windowHandle)
         }

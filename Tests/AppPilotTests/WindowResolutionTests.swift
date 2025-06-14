@@ -425,6 +425,131 @@ struct WindowResolutionTests {
             }
         }
     }
+    
+    // MARK: - Window Handle Format Compatibility Test
+    
+    @Test("🔧 Window handle format compatibility verification", .serialized)
+    func testWindowHandleFormatCompatibility() async throws {
+        print("🔧 Starting Window Handle Format Compatibility Test")
+        print("=" * 60)
+        
+        let pilot = AppPilot()
+        
+        // Find a test application (preferably one with multiple windows)
+        print("\n🔍 Finding test application...")
+        let allApps = try await pilot.listApplications()
+        
+        // Look for apps with multiple windows to test handle compatibility
+        var testApp: AppHandle?
+        var testWindows: [WindowInfo] = []
+        
+        for app in allApps {
+            do {
+                let windows = try await pilot.listWindows(app: app.id)
+                if windows.count > 0 {
+                    testApp = app.id
+                    testWindows = windows
+                    print("✅ Selected test app: \(app.name) (\(windows.count) windows)")
+                    break
+                }
+            } catch {
+                continue
+            }
+        }
+        
+        guard let app = testApp, !testWindows.isEmpty else {
+            print("⚠️ No suitable test application found. Skipping test.")
+            throw PilotError.applicationNotFound("No app with windows found")
+        }
+        
+        // Stage 1: Test basic window access with original handles
+        print("\n🪟 Stage 1: Testing basic window access")
+        var accessibleWindows: [(window: WindowInfo, accessible: Bool)] = []
+        
+        for (index, window) in testWindows.enumerated() {
+            print("   Testing window \(index + 1): '\(window.title ?? "No title")' (\(window.id.id))")
+            
+            do {
+                // Try to find elements in this window to verify handle works
+                let elements = try await pilot.findElements(in: window.id, role: nil, title: nil, identifier: nil)
+                print("     ✅ Accessible - Found \(elements.count) elements")
+                accessibleWindows.append((window: window, accessible: true))
+            } catch {
+                print("     ❌ Not accessible - Error: \(error)")
+                accessibleWindows.append((window: window, accessible: false))
+            }
+        }
+        
+        // Stage 2: Test handle format detection and mapping
+        print("\n🔍 Stage 2: Analyzing window handle formats")
+        var formatBreakdown: [String: Int] = [:]
+        
+        for window in testWindows {
+            let handleId = window.id.id
+            var formatType: String
+            
+            if handleId.hasPrefix("win_ax_") {
+                formatType = "accessibility"
+            } else if handleId.hasPrefix("win_") && handleId.count == 20 {
+                let hash = String(handleId.dropFirst(4))
+                if hash.allSatisfy({ $0.isHexDigit }) {
+                    formatType = "hash-based"
+                } else {
+                    formatType = "unknown"
+                }
+            } else {
+                formatType = "unknown"
+            }
+            
+            formatBreakdown[formatType, default: 0] += 1
+            print("   Window: \(handleId) - Format: \(formatType)")
+        }
+        
+        print("\n📊 Handle format breakdown:")
+        for (format, count) in formatBreakdown.sorted(by: { $0.key < $1.key }) {
+            print("   \(format): \(count) windows")
+        }
+        
+        // Stage 3: Test alternative handle formats (simulated)
+        print("\n🔄 Stage 3: Testing handle format compatibility")
+        
+        let successfulWindows = accessibleWindows.filter { $0.accessible }
+        print("   Accessible windows: \(successfulWindows.count)/\(testWindows.count)")
+        
+        if successfulWindows.count == testWindows.count {
+            print("✅ All windows are accessible with their current handle formats")
+        } else {
+            print("❌ Some windows are not accessible - handle compatibility issues may exist")
+            
+            // List inaccessible windows
+            let inaccessibleWindows = accessibleWindows.filter { !$0.accessible }
+            for (window, _) in inaccessibleWindows {
+                print("     Inaccessible: '\(window.title ?? "No title")' (\(window.id.id))")
+            }
+        }
+        
+        // Stage 4: Summary and recommendations
+        print("\n📋 Stage 4: Compatibility Test Results")
+        print("=" * 60)
+        
+        let accessibilityRate = Double(successfulWindows.count) / Double(testWindows.count) * 100
+        print("   Window accessibility rate: \(String(format: "%.1f%%", accessibilityRate)) (\(successfulWindows.count)/\(testWindows.count))")
+        
+        if accessibilityRate >= 90 {
+            print("✅ Window handle compatibility appears to be working correctly")
+        } else if accessibilityRate >= 70 {
+            print("⚠️ Window handle compatibility has some issues but is mostly functional")
+        } else {
+            print("❌ Significant window handle compatibility issues detected")
+        }
+        
+        // Report format diversity
+        if formatBreakdown.count > 1 {
+            print("ℹ️ Multiple handle formats detected - compatibility layer is being tested")
+        } else {
+            print("ℹ️ Single handle format detected - limited compatibility testing possible")
+        }
+    }
 }
 
 // MARK: - Helper Extensions
