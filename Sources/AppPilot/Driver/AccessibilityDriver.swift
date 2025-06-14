@@ -31,7 +31,6 @@ public protocol AccessibilityDriver: Sendable {
 
 public actor DefaultAccessibilityDriver: AccessibilityDriver {
     
-    private var handleCounter = 0
     private var appHandles: [String: AppHandleData] = [:]
     private var windowHandles: [String: WindowHandleData] = [:]
     private let logger = Logger(subsystem: "com.apppilot.accessibility", category: "WindowResolution")
@@ -46,6 +45,7 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
         let handle: WindowHandle
         let appHandle: AppHandle
         let axWindow: AXUIElement
+        let axPointerHash: Int  // Added: AXUIElement pointer hash for consistency
     }
     
     public init() {}
@@ -236,7 +236,14 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
     
     /// Find the canonical handle for a window using simple lookup strategy
     private func findCanonicalWindowHandle(_ handleId: String) -> WindowHandleData? {
-        return windowHandles[handleId]
+        // Direct ID lookup
+        if let data = windowHandles[handleId] {
+            return data
+        }
+        
+        // No fallback - if handle doesn't exist, it needs to be regenerated
+        // This ensures consistency with the new pointer-hash based approach
+        return nil
     }
     
     
@@ -256,8 +263,16 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
             }
         }
         
-        handleCounter += 1
-        let handle = AppHandle(id: "app_\(String(format: "%04X", handleCounter))")
+        // Generate deterministic app handle based on bundle ID and process ID
+        let bundleId = app.bundleIdentifier ?? "unknown"
+        let processId = app.processIdentifier
+        
+        var hasher = Hasher()
+        hasher.combine(bundleId)
+        hasher.combine(processId)
+        let hash = abs(hasher.finalize())
+        
+        let handle = AppHandle(id: "app_\(String(format: "%08X", hash))")
         
         let axApp = AXUIElementCreateApplication(app.processIdentifier)
         
@@ -278,20 +293,23 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
     }
     
     private func generateWindowHandle(for axWindow: AXUIElement, appHandle: AppHandle) -> WindowHandle {
-        // Create a consistent ID preferring accessibility format
-        let windowID = createConsistentWindowID(for: axWindow, appHandle: appHandle)
+        // Get AXUIElement pointer hash for consistency
+        let axPointerHash = Int(bitPattern: Unmanaged.passUnretained(axWindow).toOpaque())
         
-        // Check if we already have a handle for this window
-        if let existingData = findCanonicalWindowHandle(windowID) {
+        // Check if we already have a WindowHandle for this exact AXUIElement
+        if let existingData = windowHandles.values.first(where: { $0.axPointerHash == axPointerHash }) {
             return existingData.handle
         }
         
+        // Create a consistent ID for new window
+        let windowID = createConsistentWindowID(for: axWindow, appHandle: appHandle)
         let handle = WindowHandle(id: windowID)
         
         let windowData = WindowHandleData(
             handle: handle,
             appHandle: appHandle,
-            axWindow: axWindow
+            axWindow: axWindow,
+            axPointerHash: axPointerHash  // Store pointer hash
         )
         
         windowHandles[handle.id] = windowData
@@ -308,9 +326,26 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
             return "win_ax_\(axIdentifier)"
         }
         
-        // Fallback: create counter-based ID for simplicity
-        handleCounter += 1
-        return "win_\(String(format: "%04X", handleCounter))"
+        // Create deterministic ID based on window properties
+        let title = getStringAttribute(from: axWindow, attribute: kAXTitleAttribute) ?? ""
+        let position = getPositionAttribute(from: axWindow)
+        let size = getSizeAttribute(from: axWindow)
+        
+        // Generate deterministic hash
+        var hasher = Hasher()
+        hasher.combine(appHandle.id)
+        hasher.combine(title)
+        if let pos = position {
+            hasher.combine(Int(pos.x))
+            hasher.combine(Int(pos.y))
+        }
+        if let sz = size {
+            hasher.combine(Int(sz.width))
+            hasher.combine(Int(sz.height))
+        }
+        
+        let hash = abs(hasher.finalize())
+        return "win_\(String(format: "%08X", hash))"
     }
     
     private func getPositionAttribute(from element: AXUIElement) -> CGPoint? {
