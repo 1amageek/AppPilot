@@ -1170,6 +1170,87 @@ public actor AppPilot {
         return windowImage
     }
     
+    /// Capture UI elements snapshot without image data (token-efficient)
+    ///
+    /// This method captures only the UI element hierarchy without taking a screenshot,
+    /// making it much more token-efficient for LLM processing. Use this when you only
+    /// need element information and not visual appearance.
+    ///
+    /// - Parameters:
+    ///   - window: The window to capture elements from
+    ///   - query: Optional AXUI.AXQuery to filter elements (nil = all elements)
+    ///
+    /// - Returns: ElementsSnapshot containing only filtered element hierarchy
+    ///
+    /// - Throws: 
+    ///   - `PilotError.windowNotFound` if window doesn't exist
+    ///   - `PilotError.permissionDenied` if accessibility permission not granted
+    ///
+    /// Example usage:
+    /// ```swift
+    /// // Get only buttons (very token-efficient)
+    /// let buttonQuery = AXUI.AXQuery.button()
+    /// let elementsSnapshot = try await pilot.elementsSnapshot(window: window, query: buttonQuery)
+    ///
+    /// // Get text fields only
+    /// let textFieldQuery = AXUI.AXQuery.textField()
+    /// let elementsSnapshot = try await pilot.elementsSnapshot(window: window, query: textFieldQuery)
+    ///
+    /// // Get all elements (more efficient than snapshot with image)
+    /// let allElementsSnapshot = try await pilot.elementsSnapshot(window: window)
+    /// ```
+    public func elementsSnapshot(
+        window: WindowHandle,
+        query: AXUI.AXQuery? = nil
+    ) async throws -> ElementsSnapshot {
+        // Get window information
+        let apps = try await listApplications()
+        var windowInfo: WindowInfo?
+        var targetApp: AppInfo?
+        
+        for app in apps {
+            do {
+                let windows = try await listWindows(app: app.id)
+                if let found = windows.first(where: { $0.id == window }) {
+                    windowInfo = found
+                    targetApp = app
+                    break
+                }
+            } catch {
+                continue
+            }
+        }
+        
+        guard let windowInfo = windowInfo, let targetApp = targetApp else {
+            throw PilotError.windowNotFound(window)
+        }
+        
+        // Get bundle identifier for AXDumper
+        guard let bundleId = targetApp.bundleIdentifier else {
+            throw PilotError.applicationNotFound("Bundle identifier not found")
+        }
+        
+        // Verify window exists
+        let windows = try await listWindows(app: targetApp.id)
+        guard windows.contains(where: { $0.id == window }) else {
+            throw PilotError.windowNotFound(window)
+        }
+        
+        // Use AXDumper.dump() directly with AXQuery for efficient element discovery
+        let axElements = try AXDumper.dump(
+            bundleIdentifier: bundleId,
+            query: query,
+            includeZeroSize: false
+        )
+        
+        // Create and return the elements-only snapshot
+        return ElementsSnapshot(
+            windowHandle: window,
+            windowInfo: windowInfo,
+            elements: axElements
+        )
+    }
+    
     /// Capture a selective UI snapshot with AXQuery for token-efficient element discovery
     ///
     /// This method combines window screenshot capture with selective UI element discovery
