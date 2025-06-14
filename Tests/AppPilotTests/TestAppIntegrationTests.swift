@@ -45,7 +45,7 @@ struct TestAppIntegrationTests {
         
         // Stage 1: 見る (See/Observe) - Discover click targets
         print("\n👁️ Stage 1: 見る (Observe TestApp UI)")
-        let refreshedElements = try await pilot.findElements(in: currentWindow.id)
+        let refreshedElements: [AXElement] = try await pilot.findElements(in: currentWindow.id)
         
         print("📋 All UI elements discovered (\(refreshedElements.count) total)")
         
@@ -55,7 +55,7 @@ struct TestAppIntegrationTests {
         print("🎯 Found \(testAppClickTargets.count) TestApp click targets:")
         for (index, target) in testAppClickTargets.enumerated() {
             let id = target.identifier ?? "No ID"
-            let title = target.title ?? "No title"
+            let title = target.description ?? "No title"
             print("   Target \(index + 1): ID:\(id) Label:'\(title)' at (\(target.centerPoint.x), \(target.centerPoint.y))")
         }
         
@@ -91,7 +91,7 @@ struct TestAppIntegrationTests {
         if !clickTargets.isEmpty {
             // Test with accessibility-discovered elements
             let firstTarget = clickTargets.first!
-            print("🖱️ Testing accessibility-based click on: \(firstTarget.title ?? firstTarget.id)")
+            print("🖱️ Testing accessibility-based click on: \(firstTarget.description ?? firstTarget.id)")
             
             let beforeState = await testSession.getClickTargets()
             let beforeCount = beforeState.filter { target in
@@ -183,7 +183,7 @@ struct TestAppIntegrationTests {
         
         print("🎯 Found \(finalTargets.count) click targets for testing:")
         for (index, target) in finalTargets.enumerated() {
-            let title = target.title ?? "No title"
+            let title = target.description ?? "No title"
             print("   Target \(index + 1): '\(title)' at (\(target.centerPoint.x), \(target.centerPoint.y))")
         }
         
@@ -302,7 +302,7 @@ struct TestAppIntegrationTests {
         print("\n🧠 Stage 2: 理解する (Analyze Coordinate Data)")
         #expect(interactiveElements.count > 0, "Should find interactive elements")
         
-        var coordinateData: [(element: AIElement, centerX: CGFloat, centerY: CGFloat)] = []
+        var coordinateData: [(element: AXElement, centerX: CGFloat, centerY: CGFloat)] = []
         
         for element in interactiveElements {
             let centerX = element.cgBounds.midX
@@ -394,7 +394,7 @@ struct TestAppIntegrationTests {
         print("🔍 Found \(textFields.count) text fields:")
         for (index, field) in textFields.enumerated() {
             print("   Field \(index + 1): enabled=\(field.isEnabled) at (\(field.centerPoint.x), \(field.centerPoint.y))")
-            print("      Current value: '\(field.value ?? "empty")'")
+            print("      Current value: '\(field.description ?? "empty")'")
         }
         
         guard !textFields.isEmpty else {
@@ -672,7 +672,7 @@ struct TestAppIntegrationTests {
         let buttonElements = try await pilot.findElements(in: testSession.window.id)
         let startButton = buttonElements.first { element in
             element.role?.rawValue == "Button" && 
-            (element.title?.contains("Start Test") ?? false)
+            (element.description?.contains("Start Test") ?? false)
         }
         
         if let startButton = startButton {
@@ -708,7 +708,7 @@ struct TestAppIntegrationTests {
         var inputDetected = false
         if finalTextFields.count >= 2 {
             let actualField = finalTextFields[1]
-            if let actualValue = actualField.value {
+            if let actualValue = actualField.description {
                 print("   📝 Actual field value: \"\(actualValue)\"")
                 if actualValue.contains("Hello") || actualValue.contains("123") || !actualValue.isEmpty {
                     print("   ✅ Input verification: TEXT DETECTED")
@@ -1409,17 +1409,18 @@ struct TestAppIntegrationTests {
     // MARK: - Helper Methods
     
     /// ⭐ Enhanced click target discovery with multiple strategies
-    private func findClickTargetsMultipleStrategies(elements: [AIElement]) -> [AIElement] {
+    private func findClickTargetsMultipleStrategies(elements: [AXElement]) -> [AXElement] {
         // Strategy 1: Find by accessibility identifier patterns
-        let targetsByIdentifier = elements.filter { element in
-            guard let identifier = element.identifier else { return false }
-            return (identifier.hasPrefix("click_target_") || 
+        let targetsByIdentifier = elements.compactMap { element -> AXElement? in
+            guard let identifier = element.identifier else { return nil }
+            let hasIdentifierPattern = (identifier.hasPrefix("click_target_") || 
                    identifier.hasPrefix("target_") ||
-                   identifier.contains("clickable")) && 
-                   (element.role?.rawValue == "Button" || 
+                   identifier.contains("clickable"))
+            let hasValidRole = (element.role?.rawValue == "Button" || 
                     element.role?.rawValue == "Group" || 
                     element.role?.rawValue == "Unknown" ||
                     element.role?.rawValue == "RadioButton")
+            return (hasIdentifierPattern && hasValidRole) ? element : nil
         }
         
         if !targetsByIdentifier.isEmpty {
@@ -1428,16 +1429,17 @@ struct TestAppIntegrationTests {
         }
         
         // Strategy 2: Find by accessibility label patterns
-        let targetsByLabel = elements.filter { element in
-            guard let title = element.title else { return false }
+        let targetsByLabel = elements.compactMap { element -> AXElement? in
+            guard let title = element.description else { return nil }
             let titleLower = title.lowercased()
-            return (titleLower.contains("click") || 
+            let hasKeyword = (titleLower.contains("click") || 
                    titleLower.contains("target") ||
-                   titleLower.contains("button")) && 
-                   (element.role?.rawValue == "Button" || 
+                   titleLower.contains("button"))
+            let hasValidRole = (element.role?.rawValue == "Button" || 
                     element.role?.rawValue == "Group" || 
                     element.role?.rawValue == "Unknown" ||
                     element.role?.rawValue == "RadioButton")
+            return (hasKeyword && hasValidRole) ? element : nil
         }
         
         if !targetsByLabel.isEmpty {
@@ -1452,7 +1454,7 @@ struct TestAppIntegrationTests {
             result.union(bounds)
         }
         
-        let rightPanelTargets = elements.filter { element in
+        let rightPanelTargets = elements.compactMap { element -> AXElement? in
             // Look for elements in the right portion of the window
             let isInRightPanel = element.centerPoint.x > windowBounds.midX
             
@@ -1466,7 +1468,7 @@ struct TestAppIntegrationTests {
             
             let isInteractive = element.isEnabled
             
-            return isInRightPanel && isClickableType && hasReasonableSize && isInteractive
+            return (isInRightPanel && isClickableType && hasReasonableSize && isInteractive) ? element : nil
         }
         
         if !rightPanelTargets.isEmpty {
@@ -1475,7 +1477,7 @@ struct TestAppIntegrationTests {
         }
         
         // Strategy 4: Find any interactive elements that could be test targets
-        let interactiveTargets = elements.filter { element in
+        let interactiveTargets = elements.compactMap { element -> AXElement? in
             let isClickableRole = element.role?.rawValue == "RadioButton" || 
                                  element.role?.rawValue == "Button" ||
                                  element.role?.rawValue == "Group" ||
@@ -1488,11 +1490,11 @@ struct TestAppIntegrationTests {
             let isEnabled = element.isEnabled
             
             // Exclude obvious UI elements like close buttons, title bars, etc.
-            let isNotUIChrome = !(element.title?.contains("Close") ?? false) &&
-                               !(element.title?.contains("Minimize") ?? false) &&
-                               !(element.title?.contains("Maximize") ?? false)
+            let isNotUIChrome = !(element.description?.contains("Close") ?? false) &&
+                               !(element.description?.contains("Minimize") ?? false) &&
+                               !(element.description?.contains("Maximize") ?? false)
             
-            return isClickableRole && hasReasonableSize && isEnabled && isNotUIChrome
+            return (isClickableRole && hasReasonableSize && isEnabled && isNotUIChrome) ? element : nil
         }
         
         // Sort by Y position to get consistent ordering
@@ -1506,14 +1508,14 @@ struct TestAppIntegrationTests {
     private func performCoordinateBasedFallback(
         pilot: AppPilot,
         currentWindow: WindowInfo,
-        elements: [AIElement],
+        elements: [AXElement],
         testSession: TestSession
     ) async throws -> (success: Bool, message: String) {
         
         print("🔍 Performing coordinate-based fallback testing...")
         
         // Use dynamic positioning based on window bounds instead of hardcoded coordinates
-        let potentialClickTargets = elements.filter { element in
+        let potentialClickTargets = elements.compactMap { element -> AXElement? in
             // Look for elements in the right portion of the window (test area)
             let isInTestArea = element.centerPoint.x > currentWindow.bounds.midX
             
@@ -1528,7 +1530,7 @@ struct TestAppIntegrationTests {
             
             let isEnabled = element.isEnabled
             
-            return isInTestArea && hasReasonableSize && isClickable && isEnabled
+            return (isInTestArea && hasReasonableSize && isClickable && isEnabled) ? element : nil
         }
         
         print("🎯 Found \(potentialClickTargets.count) potential click targets in test area")

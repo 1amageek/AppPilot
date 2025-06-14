@@ -211,11 +211,11 @@ struct InputSourceTests {
             print("   TextField \(index + 1): enabled=\(field.isEnabled)")
             print("      Position: (\(String(format: "%.1f", field.centerPoint.x)), \(String(format: "%.1f", field.centerPoint.y)))")
             print("      Identifier: \(field.identifier ?? "None")")
-            print("      Value: \(field.value ?? "None")")
+            print("      Value: \(field.description ?? "None")")
         }
         
         // 🎯 Enhanced TextField selection with better targeting
-        var textField: AIElement?
+        var textField: AXElement?
         
         // Strategy 1: Find main input field (right panel, enabled)
         if let foundField = textFields.first(where: { field in
@@ -354,7 +354,7 @@ struct InputSourceTests {
 
     /// Helper function to perform input source testing with any element
     private func performInputSourceTestWithElement(
-        _ element: AIElement,
+        _ element: AXElement,
         pilot: AppPilot,
         testSession: TestSession
     ) async throws {

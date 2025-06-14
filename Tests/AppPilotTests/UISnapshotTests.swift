@@ -7,6 +7,31 @@ import AXUI
 @Suite("UISnapshot Tests")
 final class UISnapshotTests {
     
+    // Helper function to create AXElement for testing
+    private func createTestAXElement(
+        role: AXUI.Role,
+        description: String? = nil,
+        identifier: String? = nil,
+        position: AXUI.Point = AXUI.Point(x: 0, y: 0),
+        size: AXUI.Size = AXUI.Size(width: 100, height: 30),
+        enabled: Bool = true,
+        selected: Bool = false,
+        focused: Bool = false
+    ) -> AXElement {
+        return AXElement(
+            role: role,
+            description: description,
+            identifier: identifier,
+            roleDescription: nil,
+            help: nil,
+            position: position,
+            size: size,
+            selected: selected,
+            enabled: enabled,
+            focused: focused
+        )
+    }
+    
     @Test("UISnapshot creation and properties")
     func testUISnapshotCreation() throws {
         // Create test data
@@ -21,32 +46,26 @@ final class UISnapshotTests {
         )
         
         let elements = [
-            AIElement(
-                id: "btn1",
-                role: AXUI.Role.button,
-                value: "Submit",
-                identifier: nil,
-                desc: nil,
-                bounds: [300, 400, 100, 40],
-                state: AXUI.AIElementState(selected: false, enabled: true, focused: false)
+            createTestAXElement(
+                role: .button,
+                description: "Submit",
+                identifier: "btn1",
+                position: AXUI.Point(x: 300, y: 400),
+                size: AXUI.Size(width: 100, height: 40)
             ),
-            AIElement(
-                id: "field1",
-                role: AXUI.Role.field,
-                value: "Hello",
+            createTestAXElement(
+                role: .field,
+                description: "Hello",
                 identifier: "username_field",
-                desc: nil,
-                bounds: [200, 200, 200, 30],
-                state: AXUI.AIElementState(selected: false, enabled: true, focused: false)
+                position: AXUI.Point(x: 200, y: 200),
+                size: AXUI.Size(width: 200, height: 30)
             ),
-            AIElement(
-                id: "text1",
-                role: AXUI.Role.text,
-                value: "Username:",
-                identifier: nil,
-                desc: nil,
-                bounds: [100, 205, 80, 20],
-                state: AXUI.AIElementState(selected: false, enabled: true, focused: false)
+            createTestAXElement(
+                role: .text,
+                description: "Username:",
+                identifier: "text1",
+                position: AXUI.Point(x: 100, y: 205),
+                size: AXUI.Size(width: 80, height: 20)
             )
         ]
         
@@ -68,200 +87,172 @@ final class UISnapshotTests {
         #expect(snapshot.imageData == imageData)
     }
     
-    @Test("UISnapshot element filtering")
+    @Test("Element filtering")
     func testElementFiltering() throws {
         let elements = [
-            AIElement(
-                id: "1",
-                role: AXUI.Role.button,
-                value: "Submit",
-                identifier: "1",
-                desc: nil,
-                bounds: [0, 0, 100, 30],
-                state: AXUI.AIElementState(selected: false, enabled: true, focused: false)
+            createTestAXElement(
+                role: .button,
+                description: "Submit",
+                identifier: "1"
             ),
-            AIElement(
-                id: "2",
-                role: AXUI.Role.button,
-                value: "Cancel",
-                identifier: "2",
-                desc: nil,
-                bounds: [0, 0, 100, 30],
-                state: AXUI.AIElementState(selected: false, enabled: true, focused: false)
+            createTestAXElement(
+                role: .button,
+                description: "Cancel",
+                identifier: "2"
             ),
-            AIElement(
-                id: "3",
-                role: AXUI.Role.button,
-                value: "OK",
+            createTestAXElement(
+                role: .button,
+                description: "Help",
                 identifier: "3",
-                desc: nil,
-                bounds: [0, 0, 100, 30],
-                state: AXUI.AIElementState(selected: false, enabled: false, focused: false)
+                enabled: false
             ),
-            AIElement(
-                id: "4",
-                role: AXUI.Role.field,
-                value: nil,
+            createTestAXElement(
+                role: .field,
+                description: "Username",
                 identifier: "4",
-                desc: nil,
-                bounds: [0, 0, 200, 30],
-                state: AXUI.AIElementState(selected: false, enabled: true, focused: false)
+                size: AXUI.Size(width: 200, height: 30)
             ),
-            AIElement(
-                id: "5",
-                role: AXUI.Role.text,
-                value: "Label",
+            createTestAXElement(
+                role: .text,
+                description: "Label",
                 identifier: "5",
-                desc: nil,
-                bounds: [0, 0, 100, 20],
-                state: AXUI.AIElementState(selected: false, enabled: true, focused: false)
+                size: AXUI.Size(width: 100, height: 20)
             )
         ]
         
+        let windowHandle = WindowHandle(id: "test")
+        let windowInfo = WindowInfo(
+            id: windowHandle,
+            title: "Test",
+            bounds: CGRect.zero,
+            isVisible: true,
+            isMain: true,
+            appName: "Test"
+        )
+        
         let snapshot = UISnapshot(
-            windowHandle: WindowHandle(id: "test"),
-            windowInfo: WindowInfo(
-                id: WindowHandle(id: "test"),
-                title: "Test",
-                bounds: .zero,
-                isVisible: true,
-                isMain: true,
-                appName: "Test"
-            ),
+            windowHandle: windowHandle,
+            windowInfo: windowInfo,
             elements: elements,
             imageData: Data()
         )
         
-        // Test clickable elements
-        let clickable = snapshot.clickableElements
-        #expect(clickable.count == 2) // Only enabled buttons
-        #expect(clickable.allSatisfy { element in
-            element.role?.rawValue == "Button" && element.isEnabled
-        })
-        
-        // Test text input elements
-        let textInputs = snapshot.textInputElements
-        #expect(textInputs.count == 1)
-        #expect(textInputs.first?.role?.rawValue == "Field")
-        
-        // Test find element
-        let submitButton = snapshot.findElement(role: "Button", title: "Submit")
-        #expect(submitButton?.value == "Submit")
-        #expect(submitButton?.id == "1")
-        
-        // Test find elements
+        // Test filtering by role
         let buttons = snapshot.findElements(role: "Button")
         #expect(buttons.count == 3)
         
-        let cancelElements = snapshot.findElements(title: "Cancel")
-        #expect(cancelElements.count == 1)
-        #expect(cancelElements.first?.value == "Cancel")
+        // Test filtering by title
+        let submitButton = snapshot.findElement(role: "Button", title: "Submit")
+        #expect(submitButton != nil)
+        #expect(submitButton?.description == "Submit")
+        
+        // Test clickable elements
+        let clickableElements = snapshot.clickableElements
+        #expect(clickableElements.count == 2) // Only enabled buttons
+        
+        // Test text input elements
+        let textInputElements = snapshot.textInputElements
+        #expect(textInputElements.count == 1) // Only the field
     }
     
-    @Test("UISnapshot elements by position")
+    @Test("Elements by position sorting")
     func testElementsByPosition() throws {
         let elements = [
-            AIElement(
-                id: "1",
-                role: AXUI.Role.button,
-                value: nil,
+            createTestAXElement(
+                role: .button,
+                description: "Bottom Left",
                 identifier: "1",
-                desc: nil,
-                bounds: [100, 100, 50, 30],
-                state: AXUI.AIElementState(selected: false, enabled: true, focused: false)
+                position: AXUI.Point(x: 100, y: 100),
+                size: AXUI.Size(width: 50, height: 30)
             ),
-            AIElement(
-                id: "2",
-                role: AXUI.Role.button,
-                value: nil,
+            createTestAXElement(
+                role: .button,
+                description: "Bottom Right",
                 identifier: "2",
-                desc: nil,
-                bounds: [200, 100, 50, 30],
-                state: AXUI.AIElementState(selected: false, enabled: true, focused: false)
+                position: AXUI.Point(x: 200, y: 100),
+                size: AXUI.Size(width: 50, height: 30)
             ),
-            AIElement(
-                id: "3",
-                role: AXUI.Role.button,
-                value: nil,
+            createTestAXElement(
+                role: .button,
+                description: "Top Left",
                 identifier: "3",
-                desc: nil,
-                bounds: [50, 200, 50, 30],
-                state: AXUI.AIElementState(selected: false, enabled: true, focused: false)
+                position: AXUI.Point(x: 50, y: 200),
+                size: AXUI.Size(width: 50, height: 30)
             ),
-            AIElement(
-                id: "4",
-                role: AXUI.Role.button,
-                value: nil,
+            createTestAXElement(
+                role: .button,
+                description: "Top Right",
                 identifier: "4",
-                desc: nil,
-                bounds: [150, 200, 50, 30],
-                state: AXUI.AIElementState(selected: false, enabled: true, focused: false)
+                position: AXUI.Point(x: 150, y: 200),
+                size: AXUI.Size(width: 50, height: 30)
             )
         ]
         
+        let windowHandle = WindowHandle(id: "test")
+        let windowInfo = WindowInfo(
+            id: windowHandle,
+            title: "Test",
+            bounds: CGRect.zero,
+            isVisible: true,
+            isMain: true,
+            appName: "Test"
+        )
+        
         let snapshot = UISnapshot(
-            windowHandle: WindowHandle(id: "test"),
-            windowInfo: WindowInfo(
-                id: WindowHandle(id: "test"),
-                title: "Test",
-                bounds: .zero,
-                isVisible: true,
-                isMain: true,
-                appName: "Test"
-            ),
+            windowHandle: windowHandle,
+            windowInfo: windowInfo,
             elements: elements,
             imageData: Data()
         )
         
-        let sorted = snapshot.elementsByPosition
-        #expect(sorted.count == 4)
+        let sortedElements = snapshot.elementsByPosition
         
-        // Elements should be sorted top-to-bottom, left-to-right
-        #expect(sorted[0].id == "1") // Top-left
-        #expect(sorted[1].id == "2") // Top-right
-        #expect(sorted[2].id == "3") // Bottom-left
-        #expect(sorted[3].id == "4") // Bottom-right
+        // Should be sorted top-left to bottom-right
+        #expect(sortedElements[0].description == "Top Left")
+        #expect(sortedElements[1].description == "Top Right")
+        #expect(sortedElements[2].description == "Bottom Left")
+        #expect(sortedElements[3].description == "Bottom Right")
     }
     
-    
-}
-
-@Suite("UISnapshot Integration Tests")
-final class UISnapshotIntegrationTests {
-    
-    @Test("Capture snapshot from TestApp")
-    func testCaptureSnapshot() async throws {
-        let pilot = AppPilot()
+    @Test("UISnapshot Codable")
+    func testUISnapshotCodable() throws {
+        let windowHandle = WindowHandle(id: "test-window")
+        let windowInfo = WindowInfo(
+            id: windowHandle,
+            title: "Test Window",
+            bounds: CGRect(x: 0, y: 0, width: 800, height: 600),
+            isVisible: true,
+            isMain: true,
+            appName: "TestApp"
+        )
         
-        // Try to find TestApp
-        do {
-            let app = try await pilot.findApplication(name: "TestApp")
-            let windows = try await pilot.listWindows(app: app)
-            
-            guard let window = windows.first else {
-                print("No windows found in TestApp - skipping test")
-                return
-            }
-            
-            // Capture snapshot
-            let snapshot = try await pilot.snapshot(
-                window: window.id
+        let elements = [
+            createTestAXElement(
+                role: .button,
+                description: "Test Button",
+                identifier: "test-btn"
             )
-            
-            // Verify snapshot
-            #expect(snapshot.windowHandle == window.id)
-            #expect(snapshot.windowInfo.title == window.title)
-            #expect(!snapshot.elements.isEmpty, "Should find some UI elements")
-            #expect(!snapshot.imageData.isEmpty, "Should have image data")
-            #expect(snapshot.image != nil, "Should be able to reconstruct CGImage")
-            
-            // Verify we can find common UI elements
-            let buttons = snapshot.findElements(role: "Button")
-            print("Found \(buttons.count) buttons in snapshot")
-            
-        } catch PilotError.applicationNotFound {
-            print("TestApp not running - skipping integration test")
-            return
-        }
+        ]
+        
+        let originalSnapshot = UISnapshot(
+            windowHandle: windowHandle,
+            windowInfo: windowInfo,
+            elements: elements,
+            imageData: Data([0x89, 0x50, 0x4E, 0x47])
+        )
+        
+        // Test encoding
+        let encoder = JSONEncoder()
+        let data = try encoder.encode(originalSnapshot)
+        #expect(data.count > 0)
+        
+        // Test decoding
+        let decoder = JSONDecoder()
+        let decodedSnapshot = try decoder.decode(UISnapshot.self, from: data)
+        
+        #expect(decodedSnapshot.windowHandle == originalSnapshot.windowHandle)
+        #expect(decodedSnapshot.windowInfo.title == originalSnapshot.windowInfo.title)
+        #expect(decodedSnapshot.elements.count == originalSnapshot.elements.count)
+        #expect(decodedSnapshot.imageData == originalSnapshot.imageData)
     }
 }

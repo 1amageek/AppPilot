@@ -26,16 +26,22 @@ struct SetValueUnitTests {
     
     @Test("ActionResult with setValue data should be Codable")
     func testActionResultSetValueCodable() async throws {
+        let testElement = AXElement(
+            role: AXUI.Role.field,
+            description: "Test Field",
+            identifier: "test-element",
+            roleDescription: nil,
+            help: nil,
+            position: AXUI.Point(x: 10, y: 20),
+            size: AXUI.Size(width: 100, height: 30),
+            selected: false,
+            enabled: true,
+            focused: false
+        )
+        
         let originalResult = ActionResult(
             success: true,
-            element: AIElement(
-                id: "test-element",
-                role: AXUI.Role.field,
-                value: "Test Field",
-                desc: nil,
-                bounds: [10, 20, 100, 30],
-                state: AXUI.AIElementState(selected: false, enabled: true, focused: false)
-            ),
+            element: testElement,
             coordinates: Point(x: 60.0, y: 35.0),
             data: .setValue(inputValue: "Input Text", actualValue: "Actual Text")
         )
@@ -64,19 +70,23 @@ struct SetValueUnitTests {
     
     // MARK: - AXElement Role Tests
     
-    @Test("AIElement roles should support value setting correctly")
-    func testAIElementRoleValueSettingSupport() async throws {
+    @Test("AXElement roles should support value setting correctly")
+    func testAXElementRoleValueSettingSupport() async throws {
         // Test supported roles
         let supportedRoles: [AXUI.Role] = [.field]
         
         for role in supportedRoles {
-            let element = AIElement(
-                id: "test-\(role.rawValue)",
+            let element = AXElement(
                 role: role,
-                value: "Test Field",
-                desc: nil,
-                bounds: [0, 0, 100, 30],
-                state: AXUI.AIElementState(selected: false, enabled: true, focused: false)
+                description: "Test Field",
+                identifier: "test-\(role.rawValue)",
+                roleDescription: nil,
+                help: nil,
+                position: AXUI.Point(x: 0, y: 0),
+                size: AXUI.Size(width: 100, height: 30),
+                selected: false,
+                enabled: true,
+                focused: false
             )
             
             // These roles should be considered text input
@@ -88,16 +98,20 @@ struct SetValueUnitTests {
         }
         
         // Test unsupported roles
-        let unsupportedRoles: [AXUI.Role] = [.button, .staticText, .image, .link]
+        let unsupportedRoles: [AXUI.Role] = [.button, .text, .image, .link]
         
         for role in unsupportedRoles {
-            let element = AIElement(
-                id: "test-\(role.rawValue)",
+            let element = AXElement(
                 role: role,
-                value: "Test Element",
-                desc: nil,
-                bounds: [0, 0, 100, 30],
-                state: AXUI.AIElementState(selected: false, enabled: true, focused: false)
+                description: "Test Element",
+                identifier: "test-\(role.rawValue)",
+                roleDescription: nil,
+                help: nil,
+                position: AXUI.Point(x: 0, y: 0),
+                size: AXUI.Size(width: 100, height: 30),
+                selected: false,
+                enabled: true,
+                focused: false
             )
             
             // These roles should not be considered text input
@@ -128,8 +142,8 @@ struct SetValueUnitTests {
     
     // MARK: - Element Validation Tests
     
-    @Test("AIElement validation logic should work correctly")
-    func testAIElementValidationLogic() async throws {
+    @Test("AXElement validation logic should work correctly")
+    func testAXElementValidationLogic() async throws {
         // Test valid text field
         let validTextField = AXElement(
             role: AXUI.Role.field,
@@ -255,14 +269,14 @@ struct SetValueUnitTests {
             if !validateElementForSetValue(element) {
                 return ActionResult(
                     success: false,
-                    element: element.convertToAIFormat(),
+                    element: element,
                     coordinates: element.centerPoint
                 )
             }
             
             return ActionResult(
                 success: true,
-                element: element.convertToAIFormat(),
+                element: element,
                 coordinates: element.centerPoint,
                 data: .setValue(inputValue: value, actualValue: value)
             )
@@ -362,7 +376,7 @@ struct SetValueUnitTests {
             // Simulate instant value setting (no animation, no events)
             return ActionResult(
                 success: true,
-                element: element.convertToAIFormat(),
+                element: element,
                 coordinates: element.centerPoint,
                 data: .setValue(inputValue: value, actualValue: value)
             )
@@ -438,7 +452,7 @@ struct SetValueUnitTests {
         // 5. ActionResult can store setValue data
         let actionResult = ActionResult(
             success: true,
-            element: element.convertToAIFormat(),
+            element: element,
             coordinates: centerPoint,
             data: setValueData
         )

@@ -186,7 +186,7 @@ actor TestSession {
         
         print("🔍 Found \(imageElements.count) image elements:")
         for img in imageElements {
-            print("   - Image: value='\(img.value ?? "NO_VALUE")' id='\(img.identifier ?? "NO_ID")' at (\(String(format: "%.1f", img.centerPoint.x)), \(String(format: "%.1f", img.centerPoint.y)))")
+            print("   - Image: value='\(img.description ?? "NO_VALUE")' id='\(img.identifier ?? "NO_ID")' at (\(String(format: "%.1f", img.centerPoint.x)), \(String(format: "%.1f", img.centerPoint.y)))")
         }
         
         print("🔍 Found \(rowElements.count) row elements:")
@@ -281,7 +281,7 @@ actor TestSession {
         
         if targetRowIndex < sortedImages.count {
             let targetImage = sortedImages[targetRowIndex]
-            print("🎯 Trying image \(targetRowIndex): value='\(targetImage.value ?? "unknown")'")
+            print("🎯 Trying image \(targetRowIndex): value='\(targetImage.description ?? "unknown")'")
             
             let result = try await pilot.click(elementID: targetImage.id)
             

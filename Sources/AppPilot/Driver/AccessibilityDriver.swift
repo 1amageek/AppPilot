@@ -16,8 +16,8 @@ public protocol AccessibilityDriver: Sendable {
     func findWindow(app: AppHandle, index: Int) async throws -> WindowHandle?
     
     // UI Element Discovery (ID-based)
-    func findElements(in window: WindowHandle, role: Role?, title: String?, identifier: String?) async throws -> [AIElement]
-    func findElement(in window: WindowHandle, role: Role, title: String?, identifier: String?) async throws -> AIElement
+    func findElements(in window: WindowHandle, role: Role?, title: String?, identifier: String?) async throws -> [AXElement]
+    func findElement(in window: WindowHandle, role: Role, title: String?, identifier: String?) async throws -> AXElement
     func elementExists(with id: String) async throws -> Bool
     func value(for id: String) async throws -> String?
     func setValue(_ value: String, for id: String) async throws
@@ -156,7 +156,7 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
     
     // MARK: - UI Element Discovery
     
-    public func findElements(in windowHandle: WindowHandle, role: Role?, title: String?, identifier: String?) async throws -> [AIElement] {
+    public func findElements(in windowHandle: WindowHandle, role: Role?, title: String?, identifier: String?) async throws -> [AXElement] {
         
         // Check accessibility permission first
         guard await checkPermission() else {
@@ -182,18 +182,14 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
         // Use AXUI's flat element dumping
         let axElements = try AXDumper.dumpWindow(bundleIdentifier: bundleId, windowIndex: windowIndex)
         
-        // Convert AXElements to AIElements with improved filtering
-        let aiElements = convertAXElementsToAIElements(axElements, windowHandle: windowHandle)
-        
-        
         // Convert Role to AXUI.Role for filtering
         let axuiRole: AXUI.Role? = role.flatMap { roleToAXUIRole($0) }
         
         // Apply precise filtering with AND logic
-        return filterElementsWithANDLogic(aiElements, role: axuiRole, title: title, identifier: identifier)
+        return filterElementsWithANDLogic(axElements, role: axuiRole, title: title, identifier: identifier)
     }
     
-    public func findElement(in window: WindowHandle, role: Role, title: String? = nil, identifier: String? = nil) async throws -> AIElement {
+    public func findElement(in window: WindowHandle, role: Role, title: String? = nil, identifier: String? = nil) async throws -> AXElement {
         // At least one of title or identifier must be provided
         guard title != nil || identifier != nil else {
             throw PilotError.invalidArgument("Either title or identifier must be provided")
@@ -447,50 +443,42 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
     
     // MARK: - Helper Methods for Improved Element Discovery
     
-    private func convertAXElementsToAIElements(_ axElements: [AXElement], windowHandle: WindowHandle) -> [AIElement] {
-        return axElements.compactMap { axElement in
-            createAIElementFromAXElement(axElement, windowHandle: windowHandle)
-        }
-    }
     
-    private func createAIElementFromAXElement(_ axElement: AXElement, windowHandle: WindowHandle) -> AIElement? {
-        guard let _ = axElement.role else { return nil }
-        
-        // Convert AXElement to AIElement using the convertToAIFormat method
-        return axElement.convertToAIFormat()
-    }
-    
-    private func filterElementsWithANDLogic(_ elements: [AIElement], role: AXUI.Role?, title: String?, identifier: String?) -> [AIElement] {
-        return elements.filter { element in
+    private func filterElementsWithANDLogic(_ elements: [AXElement], role: AXUI.Role?, title: String?, identifier: String?) -> [AXElement] {
+        return elements.compactMap { element in
             // AND logic: all specified criteria must match
             
             // Role matching - compare against AXElement's role
             if let role = role, element.role != role {
-                return false
+                return nil
             }
             
             // Title matching (case-insensitive, partial match)
             if let title = title {
-                guard let elementTitle = element.title,
+                guard let elementTitle = element.description,
                       elementTitle.localizedCaseInsensitiveContains(title) else {
-                    return false
+                    return nil
                 }
             }
             
             // Identifier matching (exact match)
             if let identifier = identifier, element.identifier != identifier {
-                return false
+                return nil
             }
             
-            // Additional quality filters using AIElement properties
-            let bounds = element.boundsAsRect
-            return element.isEnabled &&
+            // Additional quality filters using AXElement properties
+            let bounds = element.cgBounds
+            guard element.isEnabled &&
                    bounds.width > 0 &&
-                   bounds.height > 0
+                   bounds.height > 0 else {
+                return nil
+            }
+            
+            return element
         }
     }
     
-    private func selectBestMatch(from elements: [AIElement], role: String, title: String?, identifier: String?) -> AIElement {
+    private func selectBestMatch(from elements: [AXElement], role: String, title: String?, identifier: String?) -> AXElement {
         // 1. If identifier is specified, prefer exact identifier matches
         if let identifier = identifier {
             let identifierMatches = elements.filter { element in
@@ -514,7 +502,7 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
         // 2. If title is specified, prefer exact title matches
         if let title = title {
             let exactTitleMatches = elements.filter { element in
-                element.title?.lowercased() == title.lowercased()
+                element.description?.lowercased() == title.lowercased()
             }
             
             if exactTitleMatches.count == 1 {

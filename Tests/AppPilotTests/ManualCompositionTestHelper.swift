@@ -243,7 +243,7 @@ public class ManualCompositionTestHelper {
         
         for element in elements {
             if (element.role?.rawValue == "Text" || element.role?.rawValue == "Cell" || element.role?.rawValue == "Button"),
-               let text = element.value ?? element.title,
+               let text = element.description,
                !text.isEmpty,
                !text.isSystemUIText() {
                 candidates.append(text)

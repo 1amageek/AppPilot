@@ -104,14 +104,14 @@ public actor AppPilot {
     ///   - role: Optional element role filter (e.g., "Button", "Field")
     ///   - title: Optional title filter (case-insensitive partial match)
     ///   - identifier: Optional accessibility identifier filter (exact match)
-    /// - Returns: An array of `AIElement` objects matching the criteria
+    /// - Returns: An array of `AXElement` objects matching the criteria
     /// - Throws: `PilotError.windowNotFound` if the window is invalid or `PilotError.permissionDenied` if accessibility permission is not granted
     public func findElements(
         in window: WindowHandle,
         role: Role? = nil,
         title: String? = nil,
         identifier: String? = nil
-    ) async throws -> [AIElement] {
+    ) async throws -> [AXElement] {
         let elements = try await accessibilityDriver.findElements(
             in: window,
             role: role,
@@ -131,7 +131,7 @@ public actor AppPilot {
     ///   - role: The element role to search for (e.g., "Button", "Field")
     ///   - title: Optional element title to search for (case-insensitive partial match)
     ///   - identifier: Optional accessibility identifier to search for (exact match)
-    /// - Returns: The matching `AIElement`
+    /// - Returns: The matching `AXElement`
     /// - Throws: 
     ///   - `PilotError.elementNotFound` if no element matches the criteria
     ///   - `PilotError.multipleElementsFound` if multiple elements match
@@ -142,7 +142,7 @@ public actor AppPilot {
         role: Role,
         title: String? = nil,
         identifier: String? = nil
-    ) async throws -> AIElement {
+    ) async throws -> AXElement {
         let element = try await accessibilityDriver.findElement(
             in: window,
             role: role,
@@ -160,12 +160,12 @@ public actor AppPilot {
     /// - Parameters:
     ///   - window: The window to search within
     ///   - title: The button title to search for
-    /// - Returns: The matching button `AIElement`
+    /// - Returns: The matching button `AXElement`
     /// - Throws: Same errors as `findElement(in:role:title:)`
     public func findButton(
         in window: WindowHandle,
         title: String
-    ) async throws -> AIElement {
+    ) async throws -> AXElement {
         return try await findElement(in: window, role: .button, title: title, identifier: nil)
     }
     
@@ -177,12 +177,12 @@ public actor AppPilot {
     /// - Parameters:
     ///   - window: The window to search within
     ///   - placeholder: Optional placeholder text to search for
-    /// - Returns: The matching text field `AIElement`
+    /// - Returns: The matching text field `AXElement`
     /// - Throws: `PilotError.elementNotFound` if no text field is found
     public func findTextField(
         in window: WindowHandle,
         placeholder: String? = nil
-    ) async throws -> AIElement {
+    ) async throws -> AXElement {
         // Try to find by placeholder first, then any text field
         if let placeholder = placeholder {
             return try await findElement(in: window, role: .field, title: placeholder)
@@ -394,7 +394,7 @@ public actor AppPilot {
         role: Role,
         title: String,
         timeout: TimeInterval = 10.0
-    ) async throws -> AIElement {
+    ) async throws -> AXElement {
         let startTime = Date()
         while Date().timeIntervalSince(startTime) < timeout {
             do {
@@ -1253,11 +1253,8 @@ public actor AppPilot {
             includeZeroSize: false
         )
         
-        // Convert AXElements to AIElements
-        let elements = axElements.compactMap { axElement in
-            // Convert AXElement to AIElement using the convertToAIFormat method
-            axElement.convertToAIFormat()
-        }
+        // Use AXElements directly
+        let elements = axElements
         
         // Create and return the snapshot
         return UISnapshot(
@@ -1280,13 +1277,13 @@ public actor AppPilot {
     }
     
     /// Find all clickable elements in a window
-    public func findClickableElements(in window: WindowHandle) async throws -> [AIElement] {
+    public func findClickableElements(in window: WindowHandle) async throws -> [AXElement] {
         let allElements = try await findElements(in: window)
         return allElements.filter { $0.isClickableElement && $0.isEnabled }
     }
     
     /// Find all text input elements in a window
-    public func findTextInputElements(in window: WindowHandle) async throws -> [AIElement] {
+    public func findTextInputElements(in window: WindowHandle) async throws -> [AXElement] {
         let allElements = try await findElements(in: window)
         return allElements.filter { $0.isTextInputElement && $0.isEnabled }
     }
@@ -1300,8 +1297,8 @@ public actor AppPilot {
             throw PilotError.elementNotAccessible(elementID)
         }
         
-        print("🎯 AppPilot: Clicking element \(element.role?.rawValue ?? "unknown"): \(element.value ?? elementID)")
-        print("   Element bounds: \(element.bounds ?? [0, 0, 0, 0])")
+        print("🎯 AppPilot: Clicking element \(element.role?.rawValue ?? "unknown"): \(element.description ?? elementID)")
+        print("   Element bounds: \(element.cgBounds)")
         print("   Center point: \(element.centerPoint)")
         
         // Ensure target app is focused before clicking
@@ -1330,7 +1327,7 @@ public actor AppPilot {
     // MARK: - Helper Methods
     
     /// Find element by ID across all windows
-    private func findElement(by elementID: String) async throws -> AIElement? {
+    private func findElement(by elementID: String) async throws -> AXElement? {
         // Search through all applications and windows to find element with matching ID
         let apps = try await listApplications()
         
@@ -1517,7 +1514,7 @@ public actor AppPilot {
             }
             
             for element in textElements {
-                if let text = element.value ?? element.title,
+                if let text = element.description,
                    !text.isEmpty,
                    !text.isSystemUIText() {
                     candidates.append(text)

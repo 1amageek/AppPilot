@@ -596,17 +596,15 @@ public enum Role: String, Codable, CaseIterable, Sendable {
 
 // MARK: - UI Element System (AXUI Integration)
 
-/// Re-export AXElement and AIElement from AXUI for AppPilot compatibility
+/// Re-export AXElement from AXUI for AppPilot compatibility
 /// 
-/// `AXElement` represents a user interface element used internally for automation.
-/// `AIElement` represents a compact, AI-optimized element format for external APIs.
+/// `AXElement` represents a user interface element used for automation.
 /// 
 /// ```swift
 /// let elements = try await pilot.findElements(in: window, role: .button)
 /// try await pilot.click(element: elements.first!)
 /// ```
 public typealias AXElement = AXUI.AXElement
-public typealias AIElement = AXUI.AIElement
 
 
 // MARK: - Wait Specifications
@@ -635,74 +633,6 @@ public enum WaitSpec: Sendable {
     case uiChange(window: WindowHandle, timeout: TimeInterval)
 }
 
-// MARK: - AIElement Extensions for AppPilot Usage
-
-extension AIElement: @retroactive @unchecked Sendable {
-    /// Center point for click operations
-    public var centerPoint: Point {
-        guard let bounds = self.bounds, bounds.count == 4 else { 
-            return Point(x: 0.0, y: 0.0) 
-        }
-        return Point(
-            x: CGFloat(bounds[0] + bounds[2]/2), 
-            y: CGFloat(bounds[1] + bounds[3]/2)
-        )
-    }
-    
-    /// Convert bounds to CGRect
-    public var boundsAsRect: CGRect {
-        guard let bounds = self.bounds, bounds.count == 4 else { 
-            return .zero 
-        }
-        return CGRect(
-            x: bounds[0], y: bounds[1], 
-            width: bounds[2], height: bounds[3]
-        )
-    }
-    
-    /// Check if element is clickable
-    public var isClickable: Bool { 
-        guard let roleString = role?.rawValue else { return false }
-        return Role(rawValue: roleString)?.isClickable ?? false
-    }
-    
-    /// Check if element accepts text input
-    public var isTextInput: Bool {
-        guard let roleString = role?.rawValue else { return false }
-        return Role(rawValue: roleString)?.isTextInput ?? false
-    }
-    
-    /// Whether element is enabled
-    public var isEnabled: Bool {
-        state?.enabled ?? true
-    }
-    
-    /// Whether element is selected
-    public var isSelected: Bool {
-        state?.selected ?? false
-    }
-    
-    /// Whether element is focused
-    public var isFocused: Bool {
-        state?.focused ?? false
-    }
-    
-    /// Element title (mapped from value for consistency)
-    public var title: String? {
-        return value
-    }
-    
-    
-    /// Legacy compatibility properties
-    public var isTextInputElement: Bool { isTextInput }
-    public var isClickableElement: Bool { isClickable }
-    
-    /// Identifier (maps to existing id property for consistency)
-    public var identifier: String? { id }
-    
-    /// CGRect bounds for compatibility with AXElement
-    public var cgBounds: CGRect { boundsAsRect }
-}
 
 // MARK: - Extensions
 
@@ -731,12 +661,6 @@ extension String {
 // MARK: - AXElement Extensions for Internal Use
 
 extension AXElement: @retroactive @unchecked Sendable {
-    /// Convert AXElement to AIElement format for external API
-    func convertToAIFormat() -> AIElement {
-        let encoder = AXUI.AIElementEncoder()
-        return encoder.convert(from: self)
-    }
-    
     /// The screen bounds of this element as CGRect
     public var cgBounds: CGRect {
         guard let position = self.position, let size = self.size else {
@@ -767,11 +691,31 @@ extension AXElement: @retroactive @unchecked Sendable {
         return Role(rawValue: axuiRole.rawValue)?.isClickable ?? false
     }
     
+    /// Check if element is clickable (alternate name for consistency)
+    public var isClickable: Bool { isClickableElement }
+    
     /// Whether this element accepts text input based on its role
     public var isTextInputElement: Bool {
         guard let axuiRole = self.role else { return false }
         return Role(rawValue: axuiRole.rawValue)?.isTextInput ?? false
     }
+    
+    /// Check if element accepts text input (alternate name for consistency) 
+    public var isTextInput: Bool { isTextInputElement }
+    
+    /// Whether element is selected
+    public var isSelected: Bool {
+        state?.selected ?? false
+    }
+    
+    /// Whether element is focused
+    public var isFocused: Bool {
+        state?.focused ?? false
+    }
+    
+    /// Convert bounds to CGRect (alias for cgBounds)
+    public var boundsAsRect: CGRect { cgBounds }
+    
 }
 
 /// Convert AppPilot Point to AXUI Point
@@ -835,7 +779,7 @@ public struct ActionResult: Sendable, Codable {
     /// When the action was performed
     public let timestamp: Date
     /// The UI element involved in the action, if any
-    public let element: AIElement?
+    public let element: AXElement?
     /// The screen coordinates where the action occurred, if applicable
     public let coordinates: Point?
     /// Action-specific data
@@ -849,7 +793,7 @@ public struct ActionResult: Sendable, Codable {
     ///   - element: The UI element involved, if any
     ///   - coordinates: The coordinates where the action occurred, if applicable
     ///   - data: Action-specific data, if any
-    public init(success: Bool, timestamp: Date = Date(), element: AIElement? = nil, coordinates: Point? = nil, data: ActionResultData? = nil) {
+    public init(success: Bool, timestamp: Date = Date(), element: AXElement? = nil, coordinates: Point? = nil, data: ActionResultData? = nil) {
         self.success = success
         self.timestamp = timestamp
         self.element = element
@@ -889,7 +833,7 @@ public struct UISnapshot: Sendable, Codable {
     public let windowInfo: WindowInfo
     
     /// UI elements discovered in the window (filtered by query if provided)
-    public let elements: [AIElement]
+    public let elements: [AXElement]
     
     /// PNG data of the window screenshot
     public let imageData: Data
@@ -897,7 +841,7 @@ public struct UISnapshot: Sendable, Codable {
     public init(
         windowHandle: WindowHandle,
         windowInfo: WindowInfo,
-        elements: [AIElement],
+        elements: [AXElement],
         imageData: Data
     ) {
         self.windowHandle = windowHandle
@@ -921,23 +865,23 @@ public struct UISnapshot: Sendable, Codable {
     }
     
     /// Find element by role and title in the snapshot
-    public func findElement(role: String, title: String? = nil) -> AIElement? {
+    public func findElement(role: String, title: String? = nil) -> AXElement? {
         elements.first { element in
             element.role?.rawValue == role &&
-            (title == nil || element.value?.localizedCaseInsensitiveContains(title!) == true)
+            (title == nil || element.description?.localizedCaseInsensitiveContains(title!) == true)
         }
     }
     
     /// Find all elements matching criteria
-    public func findElements(role: String? = nil, title: String? = nil) -> [AIElement] {
+    public func findElements(role: String? = nil, title: String? = nil) -> [AXElement] {
         elements.filter { element in
             (role == nil || element.role?.rawValue == role) &&
-            (title == nil || element.value?.localizedCaseInsensitiveContains(title!) == true)
+            (title == nil || element.description?.localizedCaseInsensitiveContains(title!) == true)
         }
     }
     
     /// Get elements sorted by their position (top-left to bottom-right)
-    public var elementsByPosition: [AIElement] {
+    public var elementsByPosition: [AXElement] {
         elements.sorted { e1, e2 in
             let bounds1 = e1.boundsAsRect
             let bounds2 = e2.boundsAsRect
@@ -949,14 +893,14 @@ public struct UISnapshot: Sendable, Codable {
     }
     
     /// Get clickable elements only
-    public var clickableElements: [AIElement] {
+    public var clickableElements: [AXElement] {
         elements.filter { element in
             element.isClickable && element.isEnabled
         }
     }
     
     /// Get text input elements only
-    public var textInputElements: [AIElement] {
+    public var textInputElements: [AXElement] {
         elements.filter { element in
             element.isTextInput && element.isEnabled
         }
@@ -1166,11 +1110,11 @@ public struct AXEvent: Sendable {
     
     public let type: EventType
     public let windowHandle: WindowHandle
-    public let element: AIElement?
+    public let element: AXElement?
     public let timestamp: Date
     public let description: String?
     
-    public init(type: EventType, windowHandle: WindowHandle, element: AIElement? = nil, timestamp: Date = Date(), description: String? = nil) {
+    public init(type: EventType, windowHandle: WindowHandle, element: AXElement? = nil, timestamp: Date = Date(), description: String? = nil) {
         self.type = type
         self.windowHandle = windowHandle
         self.element = element
