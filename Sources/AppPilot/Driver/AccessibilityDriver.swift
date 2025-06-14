@@ -3,6 +3,7 @@ import ApplicationServices
 import AppKit
 import AXUI
 import CryptoKit
+import OSLog
 
 // MARK: - Accessibility Driver Protocol
 
@@ -34,6 +35,7 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
     private var handleCounter = 0
     private var appHandles: [String: AppHandleData] = [:]
     private var windowHandles: [String: WindowHandleData] = [:]
+    private let logger = Logger(subsystem: "com.apppilot.accessibility", category: "WindowResolution")
     
     private struct AppHandleData {
         let handle: AppHandle
@@ -102,23 +104,40 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
             throw PilotError.applicationNotFound(appHandle.id)
         }
         
+        // Log the application being queried
+        logger.debug("Getting windows for app: \(appHandle.id, privacy: .public) (\(appData.app.localizedName ?? "Unknown", privacy: .public))")
+        
         // Get windows from Accessibility API
         var windowsRef: CFTypeRef?
         let result = AXUIElementCopyAttributeValue(appData.axApp, kAXWindowsAttribute as CFString, &windowsRef)
         
         guard result == .success, let axWindows = windowsRef as? [AXUIElement] else {
+            logger.warning("Failed to get windows for app \(appHandle.id, privacy: .public) - AX result: \(String(describing: result), privacy: .public)")
             return []
         }
         
+        logger.debug("Found \(axWindows.count) window(s) from Accessibility API for \(appData.app.localizedName ?? "Unknown", privacy: .public)")
+        
         var windows: [WindowInfo] = []
         
-        for (_, axWindow) in axWindows.enumerated() {
+        for (index, axWindow) in axWindows.enumerated() {
             let windowHandle = try await generateWindowHandle(for: axWindow, appHandle: appHandle)
             
             let title = getStringAttribute(from: axWindow, attribute: kAXTitleAttribute)
             let isMain = getBoolAttribute(from: axWindow, attribute: kAXMainAttribute) ?? false
             let isVisible = !(getBoolAttribute(from: axWindow, attribute: kAXHiddenAttribute) ?? false)
             let bounds = try getWindowBounds(from: axWindow)
+            
+            // Verify window ownership by checking the parent application
+            let windowOwnershipInfo = try await verifyWindowOwnership(axWindow: axWindow, expectedApp: appData)
+            
+            logger.debug("Processing window \(index + 1): '\(title ?? "No title", privacy: .public)' (\(windowHandle.id, privacy: .public))")
+            
+            if !windowOwnershipInfo.verified {
+                logger.warning("Window ownership verification failed for '\(title ?? "No title", privacy: .public)': \(windowOwnershipInfo.issue ?? "Unknown issue", privacy: .public)")
+                logger.info("Skipping window that belongs to: \(windowOwnershipInfo.actualOwner ?? "Unknown", privacy: .public)")
+                continue
+            }
             
             let windowInfo = WindowInfo(
                 id: windowHandle,
@@ -130,6 +149,8 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
             )
             windows.append(windowInfo)
         }
+        
+        logger.info("Returning \(windows.count) verified window(s) for \(appData.app.localizedName ?? "Unknown", privacy: .public)")
         
         return windows
     }
@@ -744,6 +765,185 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
         default:
             return nil
         }
+    }
+    
+    // MARK: - Window Ownership Verification
+    
+    /// Window ownership verification result
+    private struct WindowOwnershipInfo {
+        let verified: Bool
+        let issue: String?
+        let actualOwner: String?
+    }
+    
+    /// Verify that a window actually belongs to the expected application using multiple validation methods
+    private func verifyWindowOwnership(axWindow: AXUIElement, expectedApp: AppHandleData) async throws -> WindowOwnershipInfo {
+        let expectedPID = expectedApp.app.processIdentifier
+        let expectedBundleId = expectedApp.app.bundleIdentifier
+        let expectedAppName = expectedApp.app.localizedName
+        
+        // Method 1: Process ID verification (most reliable)
+        if let actualPID = getWindowProcessId(from: axWindow) {
+            if actualPID == expectedPID {
+                logger.debug("Window ownership verified by PID for \(expectedAppName ?? "Unknown", privacy: .public)")
+                return WindowOwnershipInfo(verified: true, issue: nil, actualOwner: nil)
+            } else {
+                // Find the actual application with this PID
+                let runningApps = NSWorkspace.shared.runningApplications
+                let actualApp = runningApps.first { $0.processIdentifier == actualPID }
+                let actualOwner = actualApp?.localizedName ?? "Unknown"
+                let actualBundleId = actualApp?.bundleIdentifier ?? "Unknown"
+                
+                logger.debug("Window PID mismatch: expected \(expectedPID), actual \(actualPID) (\(actualOwner, privacy: .public))")
+                
+                return WindowOwnershipInfo(
+                    verified: false,
+                    issue: "Window PID (\(actualPID)) ≠ Expected PID (\(expectedPID)). Window belongs to '\(actualOwner)' (\(actualBundleId))",
+                    actualOwner: actualOwner
+                )
+            }
+        }
+        
+        // Method 2: Bundle ID verification (fallback)
+        if let expectedBundleId = expectedBundleId,
+           let windowBundleId = getWindowBundleId(from: axWindow) {
+            if windowBundleId == expectedBundleId {
+                logger.debug("Window ownership verified by Bundle ID (PID unavailable) for \(expectedAppName ?? "Unknown", privacy: .public)")
+                return WindowOwnershipInfo(
+                    verified: true,
+                    issue: "PID unavailable, verified by Bundle ID",
+                    actualOwner: nil
+                )
+            } else {
+                logger.debug("Window Bundle ID mismatch: expected \(expectedBundleId, privacy: .public), actual \(windowBundleId, privacy: .public)")
+                return WindowOwnershipInfo(
+                    verified: false,
+                    issue: "Window Bundle ID (\(windowBundleId)) ≠ Expected Bundle ID (\(expectedBundleId))",
+                    actualOwner: "Bundle ID: \(windowBundleId)"
+                )
+            }
+        }
+        
+        // Method 3: Parent application verification (last resort)
+        if let parentApp = getParentApplication(from: axWindow) {
+            if let parentPID = getProcessId(from: parentApp) {
+                if parentPID == expectedPID {
+                    logger.debug("Window ownership verified by parent app (last resort) for \(expectedAppName ?? "Unknown", privacy: .public)")
+                    return WindowOwnershipInfo(
+                        verified: true,
+                        issue: "Direct PID and Bundle ID unavailable, verified by parent app",
+                        actualOwner: nil
+                    )
+                } else {
+                    let runningApps = NSWorkspace.shared.runningApplications
+                    let actualApp = runningApps.first { $0.processIdentifier == parentPID }
+                    let actualOwner = actualApp?.localizedName ?? "Unknown"
+                    
+                    logger.debug("Parent App PID mismatch: expected \(expectedPID), actual \(parentPID) (\(actualOwner, privacy: .public))")
+                    return WindowOwnershipInfo(
+                        verified: false,
+                        issue: "Parent App PID (\(parentPID)) ≠ Expected PID (\(expectedPID)). Parent is '\(actualOwner)'",
+                        actualOwner: actualOwner
+                    )
+                }
+            }
+        }
+        
+        // Method 4: Complete failure - unable to verify ownership
+        logger.warning("Unable to verify window ownership through any method for \(expectedAppName ?? "Unknown", privacy: .public)")
+        return WindowOwnershipInfo(
+            verified: false,
+            issue: "Unable to verify window ownership - no PID, Bundle ID, or Parent App information available",
+            actualOwner: "Unknown"
+        )
+    }
+    
+    /// Get bundle identifier from an application AXUIElement
+    private func getApplicationBundleId(from axApp: AXUIElement) -> String? {
+        // Try to get bundle identifier attribute
+        if let bundleId = getStringAttribute(from: axApp, attribute: "AXBundleIdentifier") {
+            return bundleId
+        }
+        
+        // Alternative: try to get process ID and look up bundle ID
+        if let pid = getProcessId(from: axApp) {
+            let runningApps = NSWorkspace.shared.runningApplications
+            return runningApps.first { $0.processIdentifier == pid }?.bundleIdentifier
+        }
+        
+        return nil
+    }
+    
+    /// Get process ID from a window AXUIElement
+    private func getWindowProcessId(from axWindow: AXUIElement) -> pid_t? {
+        // Get process ID directly from the window element
+        var pid: pid_t = 0
+        let result = AXUIElementGetPid(axWindow, &pid)
+        
+        if result == .success {
+            return pid
+        }
+        
+        return nil
+    }
+    
+    /// Get process ID from an application AXUIElement
+    private func getProcessId(from axApp: AXUIElement) -> pid_t? {
+        var pid: pid_t = 0
+        let result = AXUIElementGetPid(axApp, &pid)
+        
+        if result == .success {
+            return pid
+        }
+        
+        return nil
+    }
+    
+    /// Get bundle identifier from a window AXUIElement
+    private func getWindowBundleId(from axWindow: AXUIElement) -> String? {
+        // Try to get the parent application first
+        if let parentApp = getParentApplication(from: axWindow) {
+            return getApplicationBundleId(from: parentApp)
+        }
+        
+        // Alternative: try to get PID and look up bundle ID
+        if let pid = getWindowProcessId(from: axWindow) {
+            let runningApps = NSWorkspace.shared.runningApplications
+            return runningApps.first { $0.processIdentifier == pid }?.bundleIdentifier
+        }
+        
+        return nil
+    }
+    
+    /// Get parent application AXUIElement from a window
+    private func getParentApplication(from axWindow: AXUIElement) -> AXUIElement? {
+        // Method 1: Try to get the parent application directly
+        var appRef: CFTypeRef?
+        let result = AXUIElementCopyAttributeValue(axWindow, kAXParentAttribute as CFString, &appRef)
+        
+        if result == .success, let parentRef = appRef {
+            // CoreFoundation type conversion - need to check type ID
+            let axElementTypeID = AXUIElementGetTypeID()
+            if CFGetTypeID(parentRef) == axElementTypeID {
+                let parentElement = unsafeDowncast(parentRef, to: AXUIElement.self)
+                
+                // Check if this is the application element
+                if let role = getStringAttribute(from: parentElement, attribute: kAXRoleAttribute),
+                   role == kAXApplicationRole {
+                    return parentElement
+                }
+                
+                // If not, try to traverse up the hierarchy
+                return getParentApplication(from: parentElement)
+            }
+        }
+        
+        // Method 2: Create application element from window's PID
+        if let pid = getWindowProcessId(from: axWindow) {
+            return AXUIElementCreateApplication(pid)
+        }
+        
+        return nil
     }
 }
 
