@@ -23,6 +23,7 @@ public protocol ScreenDriver: Sendable {
                       bundleIdentifier: String?,
                       bounds: CGRect,
                       onScreenOnly: Bool)        async throws -> UInt32?
+    func findWindowByCGWindowID(_ cgWindowID: UInt32) async throws -> UInt32?
     func captureRegion(_ region: CGRect)          async throws -> CGImage
     func checkScreenRecordingPermission()         async -> Bool
     func requestScreenRecordingPermission()       async throws
@@ -173,13 +174,31 @@ public actor DefaultScreenDriver: ScreenDriver {
                              bounds: CGRect,
                              onScreenOnly: Bool) async throws -> UInt32? {
         let content = try await getShareableContentInternal(onScreenWindowsOnly: onScreenOnly)
+        
         return content.windows
             .first(where: { w in
-                (title == nil  || w.title == title) &&
-                (bundleIdentifier == nil ||
-                 w.owningApplication?.bundleIdentifier == bundleIdentifier) &&
-                w.frame.isAlmostEqual(to: bounds, tolerance: 10)
+                let bundleMatch = (bundleIdentifier == nil ||
+                                 w.owningApplication?.bundleIdentifier == bundleIdentifier)
+                let boundsMatch = w.frame.isAlmostEqual(to: bounds, tolerance: 10)
+                let titleMatch = (title == nil || w.title == title)
+                
+                // System specification: For apps without CGWindowID (like Chrome),
+                // use bundleIdentifier + bounds as primary matching criteria
+                // Title matching is unreliable due to AX vs SC title differences
+                let shouldMatchTitle = bundleIdentifier != "com.google.Chrome"
+                
+                if shouldMatchTitle {
+                    return titleMatch && bundleMatch && boundsMatch
+                } else {
+                    // For Chrome: bundle + bounds only (title is unreliable)
+                    return bundleMatch && boundsMatch
+                }
             })?.windowID
+    }
+    
+    public func findWindowByCGWindowID(_ cgWindowID: UInt32) async throws -> UInt32? {
+        let content = try await getShareableContentInternal(onScreenWindowsOnly: false)
+        return content.windows.first(where: { $0.windowID == cgWindowID })?.windowID
     }
     
     public func captureRegion(_ region: CGRect) async throws -> CGImage {

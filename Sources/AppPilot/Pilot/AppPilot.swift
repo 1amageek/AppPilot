@@ -1132,8 +1132,24 @@ public actor AppPilot {
     }
     
     /// Capture screenshot of window
-    public func capture(window: WindowHandle) async throws -> CGImage {        
-        // Get window information and parent application
+    public func capture(window: WindowHandle) async throws -> CGImage {
+        // Check if window handle is still valid first
+        if await accessibilityDriver.isWindowHandleValid(window) {
+            // Try direct approach first - find the window in current app lists
+            let apps = try await listApplications()
+            for app in apps {
+                do {
+                    let windows = try await listWindows(app: app.id)
+                    if let windowInfo = windows.first(where: { $0.id == window }) {
+                        return try await captureWindowDirect(windowInfo: windowInfo, app: app)
+                    }
+                } catch {
+                    continue
+                }
+            }
+        }
+        
+        // If direct approach failed, refresh and try again
         let apps = try await listApplications()
         var windowInfo: WindowInfo?
         var targetApp: AppInfo?
@@ -1155,7 +1171,28 @@ public actor AppPilot {
             throw PilotError.windowNotFound(window)
         }
         
-        // Direct window capture using desktopIndependentWindow
+        return try await captureWindowDirect(windowInfo: windowInfo, app: app)
+    }
+    
+    /// Helper method to capture a window directly
+    private func captureWindowDirect(windowInfo: WindowInfo, app: AppInfo) async throws -> CGImage {
+        // Try direct CGWindowID approach first (faster and more reliable)
+        if let cgWindowID = windowInfo.windowID {
+            do {
+                // Verify the CGWindowID still exists in ScreenCaptureKit
+                if let validatedWindowID = try await screenDriver.findWindowByCGWindowID(cgWindowID) {
+                    return try await screenDriver.captureWindow(windowID: validatedWindowID)
+                }
+            } catch {
+                // Log but continue to fallback - CGWindowID might be stale
+                print("🔄 CGWindowID \(cgWindowID) lookup failed, falling back to title/bounds matching: \(error)")
+            }
+        }
+        
+        // Fallback to existing title/bounds matching approach
+        // For Chrome (and other apps with empty titles), try bundle ID + bounds matching
+        print("🔄 Fallback matching: title='\(windowInfo.title ?? "nil")', bundle=\(app.bundleIdentifier ?? "nil"), bounds=\(windowInfo.bounds)")
+        
         // Find the SCWindow ID that matches our WindowInfo (includes Mission Control windows)
         guard let windowID = try await screenDriver.findWindowID(
             title: windowInfo.title,
@@ -1163,8 +1200,14 @@ public actor AppPilot {
             bounds: windowInfo.bounds,
             onScreenOnly: false
         ) else {
-            throw PilotError.windowNotFound(window)
+            print("❌ No matching SCWindow found for window: \(windowInfo.id)")
+            print("   Title: '\(windowInfo.title ?? "nil")'")
+            print("   Bundle: \(app.bundleIdentifier ?? "nil")")
+            print("   Bounds: \(windowInfo.bounds)")
+            throw PilotError.windowNotFound(windowInfo.id)
         }
+        
+        print("✅ Found matching SCWindow ID: \(windowID)")
         
         let windowImage = try await screenDriver.captureWindow(windowID: windowID)
         return windowImage
@@ -1406,6 +1449,47 @@ public actor AppPilot {
     
     
     // MARK: - Helper Methods
+    
+    /// Find ScreenCaptureKit window using AccessibilityDriver window handle
+    /// 
+    /// This method bridges AccessibilityDriver and ScreenDriver by using CGWindowID
+    /// from WindowInfo to directly locate the corresponding ScreenCaptureKit window.
+    ///
+    /// - Parameter windowHandle: The accessibility window handle
+    /// - Returns: The CGWindowID if found and validated
+    /// - Throws: `PilotError.windowNotFound` or `PilotError.cgWindowIDUnavailable`
+    private func findSCWindowForAXWindow(_ windowHandle: WindowHandle) async throws -> UInt32 {
+        // Get WindowInfo from AccessibilityDriver (includes CGWindowID from kAXWindowNumberAttribute)
+        let apps = try await listApplications()
+        var windowInfo: WindowInfo?
+        
+        for app in apps {
+            do {
+                let windows = try await listWindows(app: app.id)
+                if let found = windows.first(where: { $0.id == windowHandle }) {
+                    windowInfo = found
+                    break
+                }
+            } catch {
+                continue
+            }
+        }
+        
+        guard let windowInfo = windowInfo else {
+            throw PilotError.windowNotFound(windowHandle)
+        }
+        
+        guard let cgWindowID = windowInfo.windowID else {
+            throw PilotError.cgWindowIDUnavailable(windowHandle)
+        }
+        
+        // Verify the CGWindowID exists in ScreenCaptureKit
+        guard let validatedWindowID = try await screenDriver.findWindowByCGWindowID(cgWindowID) else {
+            throw PilotError.windowNotFound(windowHandle)
+        }
+        
+        return validatedWindowID
+    }
     
     /// Find element by ID across all windows
     private func findElement(by elementID: String) async throws -> AXElement? {

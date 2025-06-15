@@ -18,6 +18,8 @@ public enum PilotError: Error, Sendable {
     case invalidArgument(String)
     case screenCaptureError(String)
     case imageConversionFailed
+    case cgWindowIDMismatch(ax: UInt32?, sck: UInt32?)
+    case cgWindowIDUnavailable(WindowHandle)
 }
 
 extension PilotError: LocalizedError {
@@ -63,6 +65,12 @@ extension PilotError: LocalizedError {
             return "Screen capture error: \(message)"
         case .imageConversionFailed:
             return "Failed to convert image to PNG data"
+        case .cgWindowIDMismatch(let ax, let sck):
+            let axStr = ax.map(String.init) ?? "nil"
+            let sckStr = sck.map(String.init) ?? "nil"
+            return "CGWindowID mismatch between AccessibilityDriver (\(axStr)) and ScreenCaptureKit (\(sckStr))"
+        case .cgWindowIDUnavailable(let windowHandle):
+            return "CGWindowID unavailable for window: \(windowHandle.id)"
         }
     }
 }

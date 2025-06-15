@@ -3,6 +3,13 @@ import ApplicationServices
 import AppKit
 import AXUI
 import OSLog
+import Carbon
+
+// MARK: - Accessibility Constants
+
+/// Window number attribute for getting CGWindowID from AXUIElement
+/// This attribute provides the bridge between Accessibility API and ScreenCaptureKit
+private let kAXWindowNumberAttribute = "AXWindowNumber"
 
 // MARK: - Accessibility Driver Protocol
 
@@ -14,6 +21,7 @@ public protocol AccessibilityDriver: Sendable {
     func getWindows(for app: AppHandle) async throws -> [WindowInfo]
     func findWindow(app: AppHandle, title: String) async throws -> WindowHandle?
     func findWindow(app: AppHandle, index: Int) async throws -> WindowHandle?
+    func findWindowHandle(byCGWindowID cgWindowID: UInt32) async throws -> WindowHandle?
     
     // UI Element Discovery (ID-based)
     func findElements(in window: WindowHandle, role: Role?, title: String?, identifier: String?) async throws -> [AXElement]
@@ -25,6 +33,9 @@ public protocol AccessibilityDriver: Sendable {
     // Event Monitoring
     func observeEvents(for window: WindowHandle, mask: AXMask) async -> AsyncStream<AXEvent>
     func checkPermission() async -> Bool
+    
+    // Window Handle Validation
+    func isWindowHandleValid(_ windowHandle: WindowHandle) async -> Bool
 }
 
 // MARK: - Default Accessibility Driver Implementation
@@ -138,13 +149,23 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
                 continue
             }
             
+            // Extract CGWindowID from accessibility window using kAXWindowNumberAttribute
+            let cgWindowID = getCGWindowID(from: axWindow)
+            
+            if let cgWindowID = cgWindowID {
+                logger.debug("Window \(index + 1) CGWindowID: \(cgWindowID)")
+            } else {
+                logger.debug("Window \(index + 1) CGWindowID: unavailable")
+            }
+            
             let windowInfo = WindowInfo(
                 id: windowHandle,
                 title: title,
                 bounds: bounds,
                 isVisible: isVisible,
                 isMain: isMain,
-                appName: appData.app.localizedName ?? "Unknown"
+                appName: appData.app.localizedName ?? "Unknown",
+                windowID: cgWindowID
             )
             windows.append(windowInfo)
         }
@@ -172,6 +193,22 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
         }
         
         return windows[index].id
+    }
+    
+    /// Find window handle by CGWindowID (cross-driver integration)
+    /// 
+    /// This method enables bridging between AccessibilityDriver and ScreenDriver by allowing
+    /// lookup of accessibility window handles using ScreenCaptureKit CGWindowID values.
+    ///
+    /// - Parameter cgWindowID: The CGWindowID to search for
+    /// - Returns: WindowHandle if found, nil otherwise
+    /// - Throws: Accessibility-related errors if permission issues occur
+    public func findWindowHandle(byCGWindowID cgWindowID: UInt32) async throws -> WindowHandle? {
+        guard let windowData = findWindowByCGWindowID(cgWindowID) else {
+            return nil
+        }
+        
+        return windowData.handle
     }
     
     // MARK: - UI Element Discovery
@@ -234,15 +271,57 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
     
     
     
-    /// Find the canonical handle for a window using simple lookup strategy
+    /// Find the canonical handle for a window using comprehensive lookup strategy
     private func findCanonicalWindowHandle(_ handleId: String) -> WindowHandleData? {
         // Direct ID lookup
         if let data = windowHandles[handleId] {
             return data
         }
         
-        // No fallback - if handle doesn't exist, it needs to be regenerated
-        // This ensures consistency with the new pointer-hash based approach
+        logger.debug("Direct lookup failed for handle '\(handleId, privacy: .public)', attempting recovery...")
+        
+        // Try to find by scanning all apps and refreshing window handles
+        // This is a recovery mechanism for when handles become stale
+        
+        // Get all running applications
+        let runningApps = NSWorkspace.shared.runningApplications
+        
+        for app in runningApps {
+            guard app.activationPolicy == .regular else { continue }
+            
+            // Find our app handle
+            guard let appData = appHandles.values.first(where: { $0.app.processIdentifier == app.processIdentifier }) else {
+                continue
+            }
+            
+            // Get windows from Accessibility API
+            var windowsRef: CFTypeRef?
+            let result = AXUIElementCopyAttributeValue(appData.axApp, kAXWindowsAttribute as CFString, &windowsRef)
+            
+            guard result == .success, let axWindows = windowsRef as? [AXUIElement] else {
+                continue
+            }
+            
+            // Check if any of these windows should have the target handle ID
+            for axWindow in axWindows {
+                let regeneratedID = createConsistentWindowID(for: axWindow, appHandle: appData.handle)
+                if regeneratedID == handleId {
+                    // Found the window! Update our cache
+                    let axPointerHash = Int(bitPattern: Unmanaged.passUnretained(axWindow).toOpaque())
+                    let windowData = WindowHandleData(
+                        handle: WindowHandle(id: handleId),
+                        appHandle: appData.handle,
+                        axWindow: axWindow,
+                        axPointerHash: axPointerHash
+                    )
+                    windowHandles[handleId] = windowData
+                    logger.debug("Recovered window handle '\(handleId, privacy: .public)' through regeneration")
+                    return windowData
+                }
+            }
+        }
+        
+        logger.warning("Failed to recover window handle '\(handleId, privacy: .public)'")
         return nil
     }
     
@@ -251,6 +330,53 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
     /// Simple error reporting for window handle resolution failures
     private func logWindowHandleResolutionFailure(_ targetHandle: String, context: String) {
         logger.error("Window handle not found: '\(targetHandle, privacy: .public)' in \(context, privacy: .public)")
+    }
+    
+    /// Find window handle by CGWindowID
+    /// 
+    /// This method searches all cached window handles for one that matches the specified CGWindowID.
+    /// This provides direct lookup capability for integrating with ScreenCaptureKit.
+    ///
+    /// - Parameter cgWindowID: The CGWindowID to search for
+    /// - Returns: WindowHandleData if found, nil otherwise
+    private func findWindowByCGWindowID(_ cgWindowID: UInt32) -> WindowHandleData? {
+        logger.debug("Searching for window with CGWindowID: \(cgWindowID)")
+        
+        // Search all cached windows for matching CGWindowID
+        for (handleId, windowData) in windowHandles {
+            if let currentCGWindowID = getCGWindowID(from: windowData.axWindow) {
+                if currentCGWindowID == cgWindowID {
+                    logger.debug("Found window handle '\(handleId, privacy: .public)' for CGWindowID: \(cgWindowID)")
+                    return windowData
+                }
+            }
+        }
+        
+        logger.debug("No window handle found for CGWindowID: \(cgWindowID)")
+        return nil
+    }
+    
+    /// Validate that CGWindowID from AX matches expected value
+    /// 
+    /// This method can be used to verify consistency between cached CGWindowID values
+    /// and live AX data, helping detect stale window references.
+    ///
+    /// - Parameters:
+    ///   - axWindow: The accessibility window element
+    ///   - expectedCGWindowID: The expected CGWindowID
+    /// - Returns: true if the CGWindowID matches or is unavailable, false if mismatched
+    private func validateCGWindowIDConsistency(axWindow: AXUIElement, expectedCGWindowID: UInt32) -> Bool {
+        guard let actualCGWindowID = getCGWindowID(from: axWindow) else {
+            // If CGWindowID is unavailable, we can't validate but shouldn't fail
+            return true
+        }
+        
+        let isConsistent = actualCGWindowID == expectedCGWindowID
+        if !isConsistent {
+            logger.warning("CGWindowID mismatch - expected: \(expectedCGWindowID), actual: \(actualCGWindowID)")
+        }
+        
+        return isConsistent
     }
     
     // MARK: - Private Helper Methods
@@ -296,20 +422,62 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
         // Get AXUIElement pointer hash for consistency
         let axPointerHash = Int(bitPattern: Unmanaged.passUnretained(axWindow).toOpaque())
         
-        // Check if we already have a WindowHandle for this exact AXUIElement
+        // Check if we already have a WindowHandle for this exact AXUIElement (by pointer)
         if let existingData = windowHandles.values.first(where: { $0.axPointerHash == axPointerHash }) {
             return existingData.handle
         }
         
-        // Create a consistent ID for new window
-        let windowID = createConsistentWindowID(for: axWindow, appHandle: appHandle)
-        let handle = WindowHandle(id: windowID)
+        // Try to use CGWindowID as primary key (correct system specification approach)
+        if let cgWindowID = getCGWindowID(from: axWindow) {
+            let windowId = "win_cgid_\(cgWindowID)"
+            
+            // Check if we already have this CGWindowID-based handle
+            if let existingData = windowHandles[windowId] {
+                // Update the pointer hash in case the AXUIElement was recreated
+                let updatedData = WindowHandleData(
+                    handle: existingData.handle,
+                    appHandle: existingData.appHandle,
+                    axWindow: axWindow,
+                    axPointerHash: axPointerHash
+                )
+                windowHandles[windowId] = updatedData
+                return existingData.handle
+            }
+            
+            // Create new CGWindowID-based handle
+            let handle = WindowHandle(id: windowId)
+            let windowData = WindowHandleData(
+                handle: handle,
+                appHandle: appHandle,
+                axWindow: axWindow,
+                axPointerHash: axPointerHash
+            )
+            windowHandles[windowId] = windowData
+            return handle
+        }
+        
+        // Fallback to property-based ID for windows without CGWindowID
+        let consistentID = createConsistentWindowID(for: axWindow, appHandle: appHandle)
+        if let existingData = windowHandles[consistentID] {
+            // Update the pointer hash in case the AXUIElement was recreated
+            let updatedData = WindowHandleData(
+                handle: existingData.handle,
+                appHandle: existingData.appHandle,
+                axWindow: axWindow,
+                axPointerHash: axPointerHash
+            )
+            windowHandles[consistentID] = updatedData
+            return existingData.handle
+        }
+        
+        // Create new property-based window handle
+        let handle = WindowHandle(id: consistentID)
         
         let windowData = WindowHandleData(
             handle: handle,
             appHandle: appHandle,
             axWindow: axWindow,
-            axPointerHash: axPointerHash  // Store pointer hash
+            axPointerHash: axPointerHash
         )
         
         windowHandles[handle.id] = windowData
@@ -320,28 +488,44 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
     
     
     private func createConsistentWindowID(for axWindow: AXUIElement, appHandle: AppHandle) -> String {
-        // First try to get AX identifier if available (most stable and preferred)
+        // First try to get CGWindowID if available (most stable system identifier)
+        if let cgWindowID = getCGWindowID(from: axWindow) {
+            return "win_cgw_\(cgWindowID)"
+        }
+        
+        // Second try to get AX identifier if available (stable and preferred for accessibility)
         if let axIdentifier = getStringAttribute(from: axWindow, attribute: kAXIdentifierAttribute),
            !axIdentifier.isEmpty {
             return "win_ax_\(axIdentifier)"
         }
         
-        // Create deterministic ID based on window properties
-        let title = getStringAttribute(from: axWindow, attribute: kAXTitleAttribute) ?? ""
+        // Try to get more stable attributes
+        let role = getStringAttribute(from: axWindow, attribute: kAXRoleAttribute) ?? ""
+        let subrole = getStringAttribute(from: axWindow, attribute: kAXSubroleAttribute) ?? ""
         let position = getPositionAttribute(from: axWindow)
         let size = getSizeAttribute(from: axWindow)
         
-        // Generate deterministic hash
+        // Generate deterministic hash prioritizing stable properties
         var hasher = Hasher()
         hasher.combine(appHandle.id)
-        hasher.combine(title)
+        hasher.combine(role)
+        hasher.combine(subrole)
+        
+        // Use rounded position and size to reduce sensitivity to minor changes
         if let pos = position {
-            hasher.combine(Int(pos.x))
-            hasher.combine(Int(pos.y))
+            hasher.combine(Int(pos.x / 10) * 10)  // Round to nearest 10 pixels
+            hasher.combine(Int(pos.y / 10) * 10)
         }
         if let sz = size {
-            hasher.combine(Int(sz.width))
-            hasher.combine(Int(sz.height))
+            hasher.combine(Int(sz.width / 10) * 10)  // Round to nearest 10 pixels
+            hasher.combine(Int(sz.height / 10) * 10)
+        }
+        
+        // Include title only for small windows (likely static UI elements)
+        // For large windows, title changes frequently and shouldn't be used for ID
+        if let sz = size, sz.width < 200 || sz.height < 100 {
+            let title = getStringAttribute(from: axWindow, attribute: kAXTitleAttribute) ?? ""
+            hasher.combine(title)
         }
         
         let hash = abs(hasher.finalize())
@@ -374,8 +558,17 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
         return nil
     }
     
-    
-    
+    /// Check if a WindowHandle is valid and accessible
+    public func isWindowHandleValid(_ windowHandle: WindowHandle) async -> Bool {
+        guard let windowData = findCanonicalWindowHandle(windowHandle.id) else {
+            return false
+        }
+        
+        // Verify the AXUIElement is still valid
+        var value: CFTypeRef?
+        let result = AXUIElementCopyAttributeValue(windowData.axWindow, kAXTitleAttribute as CFString, &value)
+        return result == .success
+    }
     
     /// Generic attribute getter that handles different types safely
     private func axValue<T>(_ element: AXUIElement, _ attribute: String, as type: T.Type = T.self) -> T? {
@@ -392,6 +585,35 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
     
     private func getBoolAttribute(from element: AXUIElement, attribute: String) -> Bool? {
         return axValue(element, attribute, as: Bool.self)
+    }
+    
+    /// Get CGWindowID from AXUIElement using kAXWindowNumberAttribute
+    /// 
+    /// This provides the bridge between AccessibilityDriver windows and ScreenCaptureKit CGWindowID.
+    /// The CGWindowID is a stable system identifier that can be used for direct window capture.
+    ///
+    /// - Parameter axWindow: The accessibility window element
+    /// - Returns: The CGWindowID if available, nil otherwise
+    private func getCGWindowID(from axWindow: AXUIElement) -> UInt32? {
+        var windowNumber: CFTypeRef?
+        let result = AXUIElementCopyAttributeValue(axWindow, kAXWindowNumberAttribute as CFString, &windowNumber)
+        
+        guard result == .success, let windowNumber = windowNumber else {
+            return nil
+        }
+        
+        // Handle different possible types that kAXWindowNumberAttribute might return
+        if let number = windowNumber as? NSNumber {
+            return number.uint32Value
+        } else if CFGetTypeID(windowNumber) == CFNumberGetTypeID() {
+            let cfNumber = unsafeDowncast(windowNumber, to: CFNumber.self)
+            var value: UInt32 = 0
+            if CFNumberGetValue(cfNumber, .sInt32Type, &value) {
+                return value
+            }
+        }
+        
+        return nil
     }
     
     private func getWindowBounds(from window: AXUIElement) throws -> CGRect {
