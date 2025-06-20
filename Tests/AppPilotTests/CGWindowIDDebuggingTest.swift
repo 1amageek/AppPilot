@@ -47,7 +47,7 @@ func cgWindowIDDebuggingTest() async throws {
                 let timestamp = formatter.string(from: Date())
                 
                 let filename = "cgwindowid_success_\(timestamp)_\(screenshot.width)x\(screenshot.height).png"
-                let filepath = "/Users/1amageek/Desktop/AppPilot/\(filename)"
+                let filepath = "/tmp/\(filename)"
                 
                 let url = URL(fileURLWithPath: filepath)
                 if let destination = CGImageDestinationCreateWithURL(url as CFURL, UTType.png.identifier as CFString, 1, nil) {
