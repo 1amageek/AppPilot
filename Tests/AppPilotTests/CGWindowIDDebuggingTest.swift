@@ -14,7 +14,7 @@ func cgWindowIDDebuggingTest() async throws {
     // Find Chrome application
     let chromeApp: AppHandle
     do {
-        chromeApp = try await pilot.findApplication(bundleId: "com.google.Chrome")
+        chromeApp = try await pilot.findApplication(bundleID: "com.google.Chrome")
         print("✅ Found Chrome application: \(chromeApp.id)")
     } catch {
         print("❌ Chrome not found")

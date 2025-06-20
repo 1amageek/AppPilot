@@ -45,7 +45,8 @@ struct TestAppIntegrationTests {
         
         // Stage 1: 見る (See/Observe) - Discover click targets
         print("\n👁️ Stage 1: 見る (Observe TestApp UI)")
-        let refreshedElements: [AXElement] = try await pilot.findElements(in: currentWindow.id)
+        let snapshot = try await pilot.elementsSnapshot(window: currentWindow.id)
+        let refreshedElements: [AXElement] = snapshot.elements
         
         print("📋 All UI elements discovered (\(refreshedElements.count) total)")
         
@@ -168,11 +169,12 @@ struct TestAppIntegrationTests {
         
         // Stage 1: 見る (See/Observe) - Find the 5 standard targets
         print("\n👁️ Stage 1: 見る (Discover 5-Target Layout)")
-        let allElements = try await pilot.findElements(in: testSession.window.id)
+        let snapshot = try await pilot.elementsSnapshot(window: testSession.window.id)
+        let allElements = snapshot.elements
         
         print("📋 All UI elements discovered (\(allElements.count) total):")
         let elementsByRole = Dictionary(grouping: allElements) { element in
-            element.role?.rawValue
+            element.role.rawValue
         }
         for (role, elements) in elementsByRole.sorted(by: { ($0.key ?? "") < ($1.key ?? "") }) {
             print("   \(role ?? "unknown"): \(elements.count)")
@@ -279,11 +281,12 @@ struct TestAppIntegrationTests {
         
         // Stage 1: 見る (See/Observe) - Discover elements via UI tree
         print("\n👁️ Stage 1: 見る (UI Tree Element Discovery)")
-        let allElements = try await pilot.findElements(in: testSession.window.id)
+        let snapshot = try await pilot.elementsSnapshot(window: testSession.window.id)
+        let allElements = snapshot.elements
         
         // Categorize elements by role
         let elementsByRole = Dictionary(grouping: allElements) { element in
-            element.role?.rawValue
+            element.role.rawValue
         }
         print("📂 Element breakdown by role:")
         for (role, elements) in elementsByRole.sorted(by: { ($0.key ?? "") < ($1.key ?? "") }) {
@@ -292,7 +295,7 @@ struct TestAppIntegrationTests {
         
         // Focus on interactive elements
         let interactiveElements = allElements.filter { element in
-            ["Button", "RadioButton", "Field", "Check"].contains(element.role?.rawValue ?? "") &&
+            ["Button", "RadioButton", "Field", "Check"].contains(element.role.rawValue) &&
             element.isEnabled && element.cgBounds.width > 10 && element.cgBounds.height > 10
         }
         
@@ -309,7 +312,7 @@ struct TestAppIntegrationTests {
             let centerY = element.cgBounds.midY
             coordinateData.append((element, centerX, centerY))
             
-            print("🔍 Element: \(element.role?.rawValue ?? "unknown") at center (\(centerX), \(centerY)), bounds: \(element.cgBounds)")
+            print("🔍 Element: \(element.role.rawValue) at center (\(centerX), \(centerY)), bounds: \(element.cgBounds)")
         }
         
         // Stage 3: アクション (Action) - Validate coordinate-based clicking
@@ -326,7 +329,7 @@ struct TestAppIntegrationTests {
         for (element, centerX, centerY) in coordinateData.prefix(3) { // Test first 3 elements
             discoveredClickTests += 1
             
-            print("\n🎯 Testing UI tree coordinate (\(centerX), \(centerY)) for \(element.role?.rawValue ?? "unknown")")
+            print("\n🎯 Testing UI tree coordinate (\(centerX), \(centerY)) for \(element.role.rawValue)")
             
             let beforeState = await testSession.getClickTargets()
             let beforeCount = beforeState.filter { target in
@@ -384,12 +387,10 @@ struct TestAppIntegrationTests {
         await testSession.resetState()
         try await Task.sleep(nanoseconds: 800_000_000) // 800ms standard wait
         
-        // Stage 1: 見る (See/Observe) - Find text fields
+        // Stage 1: 見る (See/Observe) - Find text fields using AXQuery
         print("\n👁️ Stage 1: 見る (Discover Text Fields)")
-        let allElements = try await pilot.findElements(in: testSession.window.id)
-        let textFields = allElements.filter { element in
-            element.role?.rawValue == "Field"
-        }
+        let snapshot = try await pilot.elementsSnapshot(window: testSession.window.id)
+        let textFields = snapshot.textInputElements
         
         print("🔍 Found \(textFields.count) text fields:")
         for (index, field) in textFields.enumerated() {
@@ -434,6 +435,8 @@ struct TestAppIntegrationTests {
             
             // Verify the value was set correctly
             print("   🔍 Verifying value was set...")
+            // Wait a bit more for UI to update
+            try await Task.sleep(nanoseconds: 200_000_000) // 200ms
             let actualValue = try await pilot.getValue(from: targetField.id)
             print("   📝 Actual value: '\(actualValue ?? "nil")'")
             
@@ -490,11 +493,9 @@ struct TestAppIntegrationTests {
         await testSession.resetState()
         try await Task.sleep(nanoseconds: 800_000_000) // 800ms standard wait
         
-        // Find text field
-        let allElements = try await pilot.findElements(in: testSession.window.id)
-        let textFields = allElements.filter { element in
-            element.role?.rawValue == "Field" && element.isEnabled
-        }
+        // Find text field using AXQuery
+        let snapshot = try await pilot.elementsSnapshot(window: testSession.window.id)
+        let textFields = snapshot.textInputElements
         
         guard let targetField = textFields.first else {
             throw TestSessionError.noTargetsFound
@@ -596,13 +597,14 @@ struct TestAppIntegrationTests {
         let currentWindow = await testSession.window
         print("📋 Current window title: '\(currentWindow.title ?? "No title")'")
         
-        let allElements = try await pilot.findElements(in: testSession.window.id)
+        let snapshot = try await pilot.elementsSnapshot(window: testSession.window.id)
+        let allElements = snapshot.elements
         
         if currentWindow.title?.contains("Keyboard") != true {
             print("🧭 Need to navigate to Keyboard tab...")
             
             let sidebarCells = allElements.filter { element in
-                element.role?.rawValue == "Cell" && 
+                element.role.rawValue == "Cell" && 
                 element.cgBounds.width > 200 && 
                 element.cgBounds.height > 40 &&
                 element.centerPoint.x < 650
@@ -631,11 +633,9 @@ struct TestAppIntegrationTests {
         print("\n🧠 Stage 2: 理解する (Find Simplified Keyboard Test Fields)")
         
         // Refresh elements after potential navigation
-        let updatedElements = try await pilot.findElements(in: testSession.window.id)
-        
-        let textFields = updatedElements.filter { element in
-            element.role?.rawValue == "Field"
-        }
+        let updatedSnapshot = try await pilot.elementsSnapshot(window: testSession.window.id)
+        let updatedElements = updatedSnapshot.elements
+        let textFields = updatedSnapshot.textInputElements
         
         print("🔍 Found \(textFields.count) text fields")
         for (index, field) in textFields.enumerated() {
@@ -669,9 +669,10 @@ struct TestAppIntegrationTests {
         
         // Step 2: Find and click the "Start Test" button
         print("2️⃣ Starting the test...")
-        let buttonElements = try await pilot.findElements(in: testSession.window.id)
+        let buttonSnapshot = try await pilot.elementsSnapshot(window: testSession.window.id)
+        let buttonElements = buttonSnapshot.elements
         let startButton = buttonElements.first { element in
-            element.role?.rawValue == "Button" && 
+            element.role.rawValue == "Button" && 
             (element.description?.contains("Start Test") ?? false)
         }
         
@@ -700,9 +701,10 @@ struct TestAppIntegrationTests {
         print("4️⃣ Verifying text input...")
         
         // Check if test auto-completed (simplified KeyboardTestView has auto-completion)
-        let finalElements = try await pilot.findElements(in: testSession.window.id)
+        let finalSnapshot = try await pilot.elementsSnapshot(window: testSession.window.id)
+        let finalElements = finalSnapshot.elements
         let finalTextFields = finalElements.filter { element in
-            element.role?.rawValue == "Field"
+            element.role.rawValue == "Field"
         }
         
         var inputDetected = false
@@ -933,17 +935,16 @@ struct TestAppIntegrationTests {
         // Stage 2: 理解する (Understand) - Element discovery
         print("\n🧠 Stage 2: 理解する (Element Discovery)")
         
-        let allElements = try await pilot.findElements(in: mainWindow.id)
+        let snapshot = try await pilot.elementsSnapshot(window: mainWindow.id)
+        let allElements = snapshot.elements
         print("🔍 Discovered \(allElements.count) UI elements")
         
         let buttons = allElements.filter { element in
-            element.role?.rawValue == "Button"
+            element.role.rawValue == "Button"
         }
-        let textFields = allElements.filter { element in
-            element.role?.rawValue == "Field"
-        }
+        let textFields = snapshot.textInputElements
         let radioButtons = allElements.filter { element in
-            element.role?.rawValue == "RadioButton"
+            element.role.rawValue == "RadioButton"
         }
         
         print("📊 Element breakdown:")
@@ -1038,8 +1039,8 @@ struct TestAppIntegrationTests {
         // Test window not found error
         print("🔍 Testing window not found error...")
         do {
-            let nonExistentWindow = WindowHandle(id: "non-existent-window-12345")
-            let _ = try await pilot.findElements(in: nonExistentWindow)
+            let nonExistentWindow = WindowHandle(id: "non-existent-window-12345", bundleID: "unknown")
+            let _ = try await pilot.elementsSnapshot(window: nonExistentWindow)
             #expect(Bool(false), "Should throw error for non-existent window")
         } catch {
             print("✅ Correctly caught window not found error: \(type(of: error))")
@@ -1112,7 +1113,8 @@ struct TestAppIntegrationTests {
         print("\n🎬 Stage 3: アクション (Test Session Operations)")
         
         // Perform some clicks to change state using dynamic element discovery
-        let allElements = try await pilot.findElements(in: testSession1.window.id)
+        let snapshot = try await pilot.elementsSnapshot(window: testSession1.window.id)
+        let allElements = snapshot.elements
         let clickTargets = findClickTargetsMultipleStrategies(elements: allElements)
         
         if let firstTarget = clickTargets.first {
@@ -1184,7 +1186,7 @@ struct TestAppIntegrationTests {
         let windows = try await pilot.listWindows(app: testApp)
         
         guard let mainWindow = windows.first else {
-            throw PilotError.windowNotFound(WindowHandle(id: "main-window"))
+            throw PilotError.windowNotFound(WindowHandle(id: "main-window", bundleID: "unknown"))
         }
         
         print("✅ Found TestApp window: \(mainWindow.bounds)")
@@ -1341,7 +1343,7 @@ struct TestAppIntegrationTests {
         
         // Test 1: Invalid window handle
         print("\n❌ Test 1: Invalid window handle...")
-        let invalidWindow = WindowHandle(id: "invalid-window-id")
+        let invalidWindow = WindowHandle(id: "invalid-window-id", bundleID: "unknown")
         
         do {
             _ = try await pilot.capture(window: invalidWindow)
@@ -1416,10 +1418,10 @@ struct TestAppIntegrationTests {
             let hasIdentifierPattern = (identifier.hasPrefix("click_target_") || 
                    identifier.hasPrefix("target_") ||
                    identifier.contains("clickable"))
-            let hasValidRole = (element.role?.rawValue == "Button" || 
-                    element.role?.rawValue == "Group" || 
-                    element.role?.rawValue == "Unknown" ||
-                    element.role?.rawValue == "RadioButton")
+            let hasValidRole = (element.role.rawValue == "Button" || 
+                    element.role.rawValue == "Group" || 
+                    element.role.rawValue == "Unknown" ||
+                    element.role.rawValue == "RadioButton")
             return (hasIdentifierPattern && hasValidRole) ? element : nil
         }
         
@@ -1435,10 +1437,10 @@ struct TestAppIntegrationTests {
             let hasKeyword = (titleLower.contains("click") || 
                    titleLower.contains("target") ||
                    titleLower.contains("button"))
-            let hasValidRole = (element.role?.rawValue == "Button" || 
-                    element.role?.rawValue == "Group" || 
-                    element.role?.rawValue == "Unknown" ||
-                    element.role?.rawValue == "RadioButton")
+            let hasValidRole = (element.role.rawValue == "Button" || 
+                    element.role.rawValue == "Group" || 
+                    element.role.rawValue == "Unknown" ||
+                    element.role.rawValue == "RadioButton")
             return (hasKeyword && hasValidRole) ? element : nil
         }
         
@@ -1458,10 +1460,10 @@ struct TestAppIntegrationTests {
             // Look for elements in the right portion of the window
             let isInRightPanel = element.centerPoint.x > windowBounds.midX
             
-            let isClickableType = element.role?.rawValue == "RadioButton" || 
-                                 element.role?.rawValue == "Button" ||
-                                 element.role?.rawValue == "Group" ||
-                                 element.role?.rawValue == "Unknown"
+            let isClickableType = element.role.rawValue == "RadioButton" || 
+                                 element.role.rawValue == "Button" ||
+                                 element.role.rawValue == "Group" ||
+                                 element.role.rawValue == "Unknown"
             
             let hasReasonableSize = element.cgBounds.width > 30 && element.cgBounds.width < 300 &&
                                    element.cgBounds.height > 30 && element.cgBounds.height < 300
@@ -1478,11 +1480,11 @@ struct TestAppIntegrationTests {
         
         // Strategy 4: Find any interactive elements that could be test targets
         let interactiveTargets = elements.compactMap { element -> AXElement? in
-            let isClickableRole = element.role?.rawValue == "RadioButton" || 
-                                 element.role?.rawValue == "Button" ||
-                                 element.role?.rawValue == "Group" ||
-                                 element.role?.rawValue == "Unknown" ||
-                                 element.role?.rawValue == "Cell"
+            let isClickableRole = element.role.rawValue == "RadioButton" || 
+                                 element.role.rawValue == "Button" ||
+                                 element.role.rawValue == "Group" ||
+                                 element.role.rawValue == "Unknown" ||
+                                 element.role.rawValue == "Cell"
             
             let hasReasonableSize = element.cgBounds.width > 20 && element.cgBounds.width < 400 &&
                                    element.cgBounds.height > 20 && element.cgBounds.height < 400
@@ -1522,11 +1524,11 @@ struct TestAppIntegrationTests {
             let hasReasonableSize = element.cgBounds.width > 30 && element.cgBounds.width < 300 &&
                                    element.cgBounds.height > 30 && element.cgBounds.height < 300
             
-            let isClickable = element.role?.rawValue == "Button" || 
-                             element.role?.rawValue == "Group" || 
-                             element.role?.rawValue == "Unknown" ||
-                             element.role?.rawValue == "RadioButton" ||
-                             element.role?.rawValue == "Cell"
+            let isClickable = element.role.rawValue == "Button" || 
+                             element.role.rawValue == "Group" || 
+                             element.role.rawValue == "Unknown" ||
+                             element.role.rawValue == "RadioButton" ||
+                             element.role.rawValue == "Cell"
             
             let isEnabled = element.isEnabled
             
@@ -1537,7 +1539,7 @@ struct TestAppIntegrationTests {
         
         if let firstTarget = potentialClickTargets.first {
             print("🖱️ Testing click on discovered UI element...")
-            print("   Element: \(firstTarget.role?.rawValue ?? "unknown") at (\(firstTarget.centerPoint.x), \(firstTarget.centerPoint.y))")
+            print("   Element: \(firstTarget.role.rawValue) at (\(firstTarget.centerPoint.x), \(firstTarget.centerPoint.y))")
             
             let beforeState = await testSession.getClickTargets()
             let beforeCount = beforeState.filter { target in

@@ -24,7 +24,7 @@ struct WindowResolutionTests {
         print("\n📱 Stage 1: Finding Weather app by bundle ID")
         let weatherApp: AppHandle
         do {
-            weatherApp = try await pilot.findApplication(bundleId: "com.apple.weather")
+            weatherApp = try await pilot.findApplication(bundleID: "com.apple.weather")
             print("✅ Found Weather app: \(weatherApp.id)")
         } catch {
             print("⚠️ Weather app not found or not running. Skipping test.")
@@ -208,7 +208,7 @@ struct WindowResolutionTests {
             
             do {
                 // Find app by bundle ID
-                let app = try await pilot.findApplication(bundleId: bundleId)
+                let app = try await pilot.findApplication(bundleID: bundleId)
                 print("   ✅ App found: \(app.id)")
                 
                 // Get windows for this app
@@ -283,7 +283,7 @@ struct WindowResolutionTests {
         print("\n🔍 Stage 1: Finding Google Chrome")
         let chromeApp: AppHandle
         do {
-            chromeApp = try await pilot.findApplication(bundleId: "com.google.Chrome")
+            chromeApp = try await pilot.findApplication(bundleID: "com.google.Chrome")
             print("✅ Found Chrome: \(chromeApp.id)")
         } catch {
             print("⚠️ Chrome not found or not running. Skipping test.")
@@ -339,7 +339,7 @@ struct WindowResolutionTests {
         
         for bundleId in browserBundleIds {
             do {
-                let otherBrowser = try await pilot.findApplication(bundleId: bundleId)
+                let otherBrowser = try await pilot.findApplication(bundleID: bundleId)
                 let otherWindows = try await pilot.listWindows(app: otherBrowser)
                 
                 print("   Checking against \(bundleId): \(otherWindows.count) windows")
@@ -470,9 +470,9 @@ struct WindowResolutionTests {
             print("   Testing window \(index + 1): '\(window.title ?? "No title")' (\(window.id.id))")
             
             do {
-                // Try to find elements in this window to verify handle works
-                let elements = try await pilot.findElements(in: window.id, role: nil, title: nil, identifier: nil)
-                print("     ✅ Accessible - Found \(elements.count) elements")
+                // Try to get elements in this window to verify handle works
+                let elementsSnapshot = try await pilot.elementsSnapshot(window: window.id)
+                print("     ✅ Accessible - Found \(elementsSnapshot.elements.count) elements")
                 accessibleWindows.append((window: window, accessible: true))
             } catch {
                 print("     ❌ Not accessible - Error: \(error)")

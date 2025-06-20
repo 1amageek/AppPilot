@@ -176,12 +176,13 @@ actor TestSession {
         print("🧭 Navigating to \(testType) tab...")
         
         // Get all elements for dynamic analysis
-        let allElements = try await pilot.findElements(in: window.id)
+        let snapshot = try await pilot.elementsSnapshot(window: window.id)
+        let allElements = snapshot.elements
         let rowElements = allElements.filter { element in
-            element.role?.rawValue == "Row"
+            element.role.rawValue == "Row"
         }
         let imageElements = allElements.filter { element in
-            element.role?.rawValue == "Image"
+            element.role.rawValue == "Image"
         }
         
         print("🔍 Found \(imageElements.count) image elements:")
@@ -228,7 +229,7 @@ actor TestSession {
             let targetRow = sidebarRows[targetRowIndex]
             print("🎯 Clicking target row \(targetRowIndex) for \(testType)")
             
-            let result = try await pilot.click(elementID: targetRow.id)
+            let result = try await pilot.clickElement(elementID: targetRow.id, in: window.id)
             
             if result.success {
                 print("✅ Navigation successful via row \(targetRowIndex) click")
@@ -247,9 +248,9 @@ actor TestSession {
         
         let leftPanelElements = allElements.filter { element in
             let isInLeftPanel = element.centerPoint.x < window.bounds.midX
-            let isClickable = element.role?.rawValue == "Row" || 
-                             element.role?.rawValue == "Button" || 
-                             element.role?.rawValue == "Cell"
+            let isClickable = element.role.rawValue == "Row" || 
+                             element.role.rawValue == "Button" || 
+                             element.role.rawValue == "Cell"
             let hasReasonableSize = element.cgBounds.width > 50 && element.cgBounds.height > 20
             
             return isInLeftPanel && isClickable && hasReasonableSize
@@ -259,9 +260,9 @@ actor TestSession {
         
         if targetRowIndex < leftPanelElements.count {
             let fallbackElement = leftPanelElements[targetRowIndex]
-            print("🎯 Trying fallback element \(targetRowIndex): \(fallbackElement.role?.rawValue ?? "unknown")")
+            print("🎯 Trying fallback element \(targetRowIndex): \(fallbackElement.role.rawValue)")
             
-            let result = try await pilot.click(elementID: fallbackElement.id)
+            let result = try await pilot.clickElement(elementID: fallbackElement.id, in: window.id)
             
             if result.success {
                 print("✅ Navigation successful via fallback element click")
@@ -283,7 +284,7 @@ actor TestSession {
             let targetImage = sortedImages[targetRowIndex]
             print("🎯 Trying image \(targetRowIndex): value='\(targetImage.description ?? "unknown")'")
             
-            let result = try await pilot.click(elementID: targetImage.id)
+            let result = try await pilot.clickElement(elementID: targetImage.id, in: window.id)
             
             if result.success {
                 print("✅ Navigation successful via image click")
@@ -377,10 +378,10 @@ extension AppPilot {
     /// Quick method to find app and window for testing
     internal func findTestApp(name: String = "TestApp") async throws -> (app: AppHandle, window: WindowHandle) {
         // Try bundle ID first for more reliable detection
-        let app = try await findApplication(bundleId: "team.stamp.TestApp")
+        let app = try await findApplication(bundleID: "team.stamp.TestApp")
         
         guard let window = try await findWindow(app: app, index: 0) else {
-            throw PilotError.windowNotFound(WindowHandle(id: "not_found"))
+            throw PilotError.windowNotFound(WindowHandle(id: "not_found", bundleID: "unknown"))
         }
         return (app: app, window: window)
     }

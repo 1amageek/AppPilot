@@ -22,7 +22,8 @@ struct CompositionInputIntegrationTests {
         try await testSession.navigateToTab()
         
         // Find text input field
-        let textFields = try await pilot.findTextInputElements(in: testSession.window.id)
+        let snapshot = try await pilot.elementsSnapshot(window: testSession.window.id)
+        let textFields = snapshot.textInputElements
         guard let textField = textFields.first(where: { $0.isEnabled }) else {
             throw TestSessionError.noTargetsFound
         }
@@ -94,7 +95,8 @@ struct CompositionInputIntegrationTests {
         
         try await testSession.navigateToTab()
         
-        let textFields = try await pilot.findTextInputElements(in: testSession.window.id)
+        let snapshot = try await pilot.elementsSnapshot(window: testSession.window.id)
+        let textFields = snapshot.textInputElements
         guard let textField = textFields.first(where: { $0.isEnabled }) else {
             throw TestSessionError.noTargetsFound
         }
@@ -150,7 +152,8 @@ struct CompositionInputIntegrationTests {
         
         try await testSession.navigateToTab()
         
-        let textFields = try await pilot.findTextInputElements(in: testSession.window.id)
+        let snapshot = try await pilot.elementsSnapshot(window: testSession.window.id)
+        let textFields = snapshot.textInputElements
         guard let textField = textFields.first(where: { $0.isEnabled }) else {
             throw TestSessionError.noTargetsFound
         }
@@ -188,7 +191,8 @@ struct CompositionInputIntegrationTests {
         
         try await testSession.navigateToTab()
         
-        let textFields = try await pilot.findTextInputElements(in: testSession.window.id)
+        let snapshot = try await pilot.elementsSnapshot(window: testSession.window.id)
+        let textFields = snapshot.textInputElements
         guard let textField = textFields.first(where: { $0.isEnabled }) else {
             throw TestSessionError.noTargetsFound
         }

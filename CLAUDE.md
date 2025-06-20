@@ -607,6 +607,8 @@ print("Result: \(resultText ?? "No value")")
 
 ### Design Decisions & Trade-offs
 
+解説は日本語で行って下さい。
+
 #### ✅ Benefits
 - **Smart Element Detection**: No more blind coordinate guessing
 - **Universal Compatibility**: Works with ALL macOS apps (SwiftUI, AppKit, Electron, Web)

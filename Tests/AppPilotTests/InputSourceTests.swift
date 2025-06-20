@@ -203,8 +203,9 @@ struct InputSourceTests {
         try await Task.sleep(nanoseconds: 500_000_000) // 500ms for UI stabilization
         
         // Find text fields in the keyboard tab
-        let elements = try await pilot.findElements(in: testSession.window.id)
-        let textFields = elements.filter { $0.role?.rawValue == "Field" }
+        let snapshot = try await pilot.elementsSnapshot(window: testSession.window.id)
+        let elements = snapshot.elements
+        let textFields = elements.filter { $0.role.rawValue == "Field" }
         
         print("🔍 Found \(textFields.count) text fields")
         for (index, field) in textFields.enumerated() {
@@ -359,7 +360,7 @@ struct InputSourceTests {
         testSession: TestSession
     ) async throws {
         print("\nPerforming Input Source Test")
-        print("Element: \(element.role?.rawValue ?? "unknown") at (\(element.centerPoint.x), \(element.centerPoint.y))")
+        print("Element: \(element.role.rawValue) at (\(element.centerPoint.x), \(element.centerPoint.y))")
         
         // Focus on the text field
         print("🖱️ Focusing on text field...")
@@ -382,7 +383,7 @@ struct InputSourceTests {
             print("\n\(index + 1)️⃣ Testing \(test.description)")
             
             // Clear existing content
-            if element.role?.rawValue == "Field" {
+            if element.role.rawValue == "Field" {
                 print("Clearing field...")
                 _ = try await pilot.setValue("", for: element.id)
                 try await Task.sleep(nanoseconds: 500_000_000) // 500ms

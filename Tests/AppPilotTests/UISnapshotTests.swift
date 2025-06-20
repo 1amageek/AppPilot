@@ -2,24 +2,27 @@ import Foundation
 import Testing
 @testable import AppPilot
 import CoreGraphics
-import AXUI
+@testable import AXUI
 
 @Suite("UISnapshot Tests")
 final class UISnapshotTests {
     
-    // Helper function to create AXElement for testing
+    // Helper function to create AXElement for testing using internal init
     private func createTestAXElement(
-        role: AXUI.Role,
-        description: String? = nil,
+        role: AXUI.Role = .button,
+        description: String? = "Test Button",
         identifier: String? = nil,
-        position: AXUI.Point = AXUI.Point(x: 0, y: 0),
-        size: AXUI.Size = AXUI.Size(width: 100, height: 30),
+        position: AXUI.Point? = AXUI.Point(x: 0, y: 0),
+        size: AXUI.Size? = AXUI.Size(width: 100, height: 30),
         enabled: Bool = true,
         selected: Bool = false,
         focused: Bool = false
     ) -> AXElement {
+        // Convert Role to SystemRole for internal init
+        let systemRole: SystemRole = role.possibleSystemRoles.first ?? .button
+        
         return AXElement(
-            role: role,
+            systemRole: systemRole,
             description: description,
             identifier: identifier,
             roleDescription: nil,
@@ -28,14 +31,16 @@ final class UISnapshotTests {
             size: size,
             selected: selected,
             enabled: enabled,
-            focused: focused
+            focused: focused,
+            children: nil,
+            axElementRef: nil
         )
     }
     
     @Test("UISnapshot creation and properties")
     func testUISnapshotCreation() throws {
         // Create test data
-        let windowHandle = WindowHandle(id: "test-window-123")
+        let windowHandle = WindowHandle(id: "test-window-123", bundleID: "com.test.app")
         let windowInfo = WindowInfo(
             id: windowHandle,
             title: "Test Window",
@@ -120,7 +125,7 @@ final class UISnapshotTests {
             )
         ]
         
-        let windowHandle = WindowHandle(id: "test")
+        let windowHandle = WindowHandle(id: "test", bundleID: "com.test.app")
         let windowInfo = WindowInfo(
             id: windowHandle,
             title: "Test",
@@ -138,11 +143,13 @@ final class UISnapshotTests {
         )
         
         // Test filtering by role
-        let buttons = snapshot.findElements(role: "Button")
+        let buttons = snapshot.elements.filter { $0.role.rawValue == "Button" }
         #expect(buttons.count == 3)
         
         // Test filtering by title
-        let submitButton = snapshot.findElement(role: "Button", title: "Submit")
+        let submitButton = snapshot.elements.first { 
+            $0.role.rawValue == "Button" && $0.description?.contains("Submit") == true 
+        }
         #expect(submitButton != nil)
         #expect(submitButton?.description == "Submit")
         
@@ -188,7 +195,7 @@ final class UISnapshotTests {
             )
         ]
         
-        let windowHandle = WindowHandle(id: "test")
+        let windowHandle = WindowHandle(id: "test", bundleID: "com.test.app")
         let windowInfo = WindowInfo(
             id: windowHandle,
             title: "Test",
@@ -216,7 +223,7 @@ final class UISnapshotTests {
     
     @Test("UISnapshot Codable")
     func testUISnapshotCodable() throws {
-        let windowHandle = WindowHandle(id: "test-window")
+        let windowHandle = WindowHandle(id: "test-window", bundleID: "com.test.app")
         let windowInfo = WindowInfo(
             id: windowHandle,
             title: "Test Window",

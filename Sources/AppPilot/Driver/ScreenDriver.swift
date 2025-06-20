@@ -17,7 +17,7 @@ import UniformTypeIdentifiers
 // MARK: - Screen Driver Protocol
 public protocol ScreenDriver: Sendable {
     func captureScreen()                          async throws -> CGImage
-    func captureApplication(bundleId: String)     async throws -> CGImage
+    func captureApplication(bundleID: String)     async throws -> CGImage
     func captureWindow(windowID: UInt32)          async throws -> CGImage
     func findWindowID(title: String?,
                       bundleIdentifier: String?,
@@ -110,18 +110,18 @@ public actor DefaultScreenDriver: ScreenDriver {
         return try await capture(filter: filter, config: config)
     }
     
-    public func captureApplication(bundleId: String) async throws -> CGImage {
+    public func captureApplication(bundleID: String) async throws -> CGImage {
         try await ensurePermission()
         let content = try await getShareableContentInternal(onScreenWindowsOnly: false)
         
         guard let app = content.applications
-            .first(where: { $0.bundleIdentifier == bundleId })
-        else { throw ScreenCaptureError.applicationNotFound(bundleId) }
+            .first(where: { $0.bundleIdentifier == bundleID })
+        else { throw ScreenCaptureError.applicationNotFound(bundleID) }
         
         let appWindows = content.windows
-            .filter { $0.owningApplication?.bundleIdentifier == bundleId }
+            .filter { $0.owningApplication?.bundleIdentifier == bundleID }
         guard !appWindows.isEmpty else {
-            throw ScreenCaptureError.noWindowsFound(bundleId)
+            throw ScreenCaptureError.noWindowsFound(bundleID)
         }
         
         guard let display = content.displays.first else {

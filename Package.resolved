@@ -1,5 +1,5 @@
 {
-  "originHash" : "2d09f5d2fcb3578c6a956908ae413b98827203662aa42621bd75238d73521a0f",
+  "originHash" : "7f3aa9886146621e3330e80c89a162b62bb06a3674bb1c59deb87d19f4c7263f",
   "pins" : [
     {
       "identity" : "axui",
@@ -7,7 +7,7 @@
       "location" : "https://github.com/1amageek/AXUI.git",
       "state" : {
         "branch" : "main",
-        "revision" : "d31098f60cba34b03507fb58b78d5177a55608b0"
+        "revision" : "d1bd5bad90c1b6269aed2c6666d48509b20513af"
       }
     },
     {

@@ -9,6 +9,9 @@ public actor AppPilot {
     private let screenDriver: ScreenDriver
     private let accessibilityDriver: AccessibilityDriver
     
+    // Element ID to WindowHandle mapping for efficient element operations
+    private var elementWindowMapping: [String: WindowHandle] = [:]
+    
     public init(
         cgEventDriver: CGEventDriver? = nil,
         screenDriver: ScreenDriver? = nil,
@@ -36,11 +39,11 @@ public actor AppPilot {
     /// 
     /// Locates a running application using its bundle identifier.
     /// 
-    /// - Parameter bundleId: The bundle identifier of the application (e.g., "com.apple.finder")
+    /// - Parameter bundleID: The bundle identifier of the application (e.g., "com.apple.finder")
     /// - Returns: An `AppHandle` for the found application
     /// - Throws: `PilotError.applicationNotFound` if no application with the specified bundle ID is running
-    public func findApplication(bundleId: String) async throws -> AppHandle {
-        return try await accessibilityDriver.findApplication(bundleId: bundleId)
+    public func findApplication(bundleID: String) async throws -> AppHandle {
+        return try await accessibilityDriver.findApplication(bundleID: bundleID)
     }
     
     /// Find application by name
@@ -92,110 +95,6 @@ public actor AppPilot {
         return try await accessibilityDriver.findWindow(app: app, index: index)
     }
     
-    // MARK: - UI Element Discovery
-    
-    /// Find UI elements by criteria
-    /// 
-    /// Searches for UI elements within a window using optional filtering criteria.
-    /// Elements are discovered using the Accessibility API and can be filtered by role, title, or identifier.
-    /// 
-    /// - Parameters:
-    ///   - window: The window to search within
-    ///   - role: Optional element role filter (e.g., "Button", "Field")
-    ///   - title: Optional title filter (case-insensitive partial match)
-    ///   - identifier: Optional accessibility identifier filter (exact match)
-    /// - Returns: An array of `AXElement` objects matching the criteria
-    /// - Throws: `PilotError.windowNotFound` if the window is invalid or `PilotError.permissionDenied` if accessibility permission is not granted
-    public func findElements(
-        in window: WindowHandle,
-        role: Role? = nil,
-        title: String? = nil,
-        identifier: String? = nil
-    ) async throws -> [AXElement] {
-        let elements = try await accessibilityDriver.findElements(
-            in: window,
-            role: role,
-            title: title,
-            identifier: identifier
-        )
-        
-        return elements
-    }
-    
-    /// Find specific UI element
-    /// 
-    /// Locates a single UI element by role and optional title/identifier. This method expects exactly one matching element.
-    /// 
-    /// - Parameters:
-    ///   - window: The window to search within
-    ///   - role: The element role to search for (e.g., "Button", "Field")
-    ///   - title: Optional element title to search for (case-insensitive partial match)
-    ///   - identifier: Optional accessibility identifier to search for (exact match)
-    /// - Returns: The matching `AXElement`
-    /// - Throws: 
-    ///   - `PilotError.elementNotFound` if no element matches the criteria
-    ///   - `PilotError.multipleElementsFound` if multiple elements match
-    ///   - `PilotError.windowNotFound` if the window is invalid
-    ///   - `PilotError.invalidArgument` if both title and identifier are nil
-    public func findElement(
-        in window: WindowHandle,
-        role: Role,
-        title: String? = nil,
-        identifier: String? = nil
-    ) async throws -> AXElement {
-        let element = try await accessibilityDriver.findElement(
-            in: window,
-            role: role,
-            title: title,
-            identifier: identifier
-        )
-        
-        return element
-    }
-    
-    /// Find button by title
-    /// 
-    /// Convenience method to locate a button element by its title.
-    /// 
-    /// - Parameters:
-    ///   - window: The window to search within
-    ///   - title: The button title to search for
-    /// - Returns: The matching button `AXElement`
-    /// - Throws: Same errors as `findElement(in:role:title:)`
-    public func findButton(
-        in window: WindowHandle,
-        title: String
-    ) async throws -> AXElement {
-        return try await findElement(in: window, role: .button, title: title, identifier: nil)
-    }
-    
-    /// Find text field
-    /// 
-    /// Locates a text input field, optionally by placeholder text.
-    /// If no placeholder is specified, returns the first available text field.
-    /// 
-    /// - Parameters:
-    ///   - window: The window to search within
-    ///   - placeholder: Optional placeholder text to search for
-    /// - Returns: The matching text field `AXElement`
-    /// - Throws: `PilotError.elementNotFound` if no text field is found
-    public func findTextField(
-        in window: WindowHandle,
-        placeholder: String? = nil
-    ) async throws -> AXElement {
-        // Try to find by placeholder first, then any text field
-        if let placeholder = placeholder {
-            return try await findElement(in: window, role: .field, title: placeholder)
-        } else {
-            // Find any text input field
-            let textFields = try await findElements(in: window, role: .field)
-            if !textFields.isEmpty {
-                return textFields[0]
-            }
-            
-            throw PilotError.elementNotFound(role: "Field", title: nil)
-        }
-    }
     
     
     // MARK: - Element-Based Actions
@@ -214,13 +113,22 @@ public actor AppPilot {
         into elementID: String,
         inputSource: InputSource = .automatic
     ) async throws -> ActionResult {
-        // Verify element is accessible and is a text input
-        guard try await accessibilityDriver.elementExists(with: elementID) else {
+        // Find the window that contains this element
+        guard let window = elementWindowMapping[elementID] else {
             throw PilotError.elementNotAccessible(elementID)
         }
         
-        // Find element to check if it's a text input
-        guard let element = try await findElement(by: elementID) else {
+        // Verify element is accessible and is a text input
+        guard try await accessibilityDriver.elementExists(with: elementID, in: window) else {
+            throw PilotError.elementNotAccessible(elementID)
+        }
+        
+        // Get element info using AXDumper directly
+        guard let bundleID = try await getBundleIDForWindow(window) else {
+            throw PilotError.elementNotAccessible(elementID)
+        }
+        
+        guard let element = try? AXDumper.element(id: elementID, bundleIdentifier: bundleID) else {
             throw PilotError.elementNotAccessible(elementID)
         }
         
@@ -229,7 +137,7 @@ public actor AppPilot {
         }
         
         guard element.isTextInputElement else {
-            throw PilotError.invalidArgument("Element \(element.role?.rawValue ?? "unknown") is not a text input field")
+            throw PilotError.invalidArgument("Element \(element.role.rawValue) is not a text input field")
         }
         
         // Click the element first to focus it
@@ -261,13 +169,22 @@ public actor AppPilot {
     
     /// Click UI element by ID (automatically calculates center point)
     public func click(elementID: String) async throws -> ActionResult {
-        // Verify element is still accessible and enabled
-        guard try await accessibilityDriver.elementExists(with: elementID) else {
+        // Find the window that contains this element
+        guard let window = elementWindowMapping[elementID] else {
             throw PilotError.elementNotAccessible(elementID)
         }
         
-        // Find element to get its bounds
-        guard let element = try await findElement(by: elementID) else {
+        // Verify element is still accessible and enabled
+        guard try await accessibilityDriver.elementExists(with: elementID, in: window) else {
+            throw PilotError.elementNotAccessible(elementID)
+        }
+        
+        // Get element info using AXDumper directly
+        guard let bundleID = try await getBundleIDForWindow(window) else {
+            throw PilotError.elementNotAccessible(elementID)
+        }
+        
+        guard let element = try? AXDumper.element(id: elementID, bundleIdentifier: bundleID) else {
             throw PilotError.elementNotAccessible(elementID)
         }
         
@@ -318,13 +235,22 @@ public actor AppPilot {
         _ value: String,
         for elementID: String
     ) async throws -> ActionResult {
-        // Verify element is accessible
-        guard try await accessibilityDriver.elementExists(with: elementID) else {
+        // Find the window that contains this element
+        guard let window = elementWindowMapping[elementID] else {
             throw PilotError.elementNotAccessible(elementID)
         }
         
-        // Find element to check if it supports value setting
-        guard let element = try await findElement(by: elementID) else {
+        // Verify element is accessible
+        guard try await accessibilityDriver.elementExists(with: elementID, in: window) else {
+            throw PilotError.elementNotAccessible(elementID)
+        }
+        
+        // Get element info using AXDumper directly
+        guard let bundleID = try await getBundleIDForWindow(window) else {
+            throw PilotError.elementNotAccessible(elementID)
+        }
+        
+        guard let element = try? AXDumper.element(id: elementID, bundleIdentifier: bundleID) else {
             throw PilotError.elementNotAccessible(elementID)
         }
         
@@ -333,12 +259,12 @@ public actor AppPilot {
         }
         
         // Verify element supports value setting
-        guard element.isTextInputElement || element.role?.rawValue == "Check" || element.role?.rawValue == "Slider" else {
-            throw PilotError.invalidArgument("Element \(element.role?.rawValue ?? "unknown") does not support direct value setting")
+        guard element.isTextInputElement || element.role.rawValue == "Check" || element.role.rawValue == "Slider" else {
+            throw PilotError.invalidArgument("Element \(element.role.rawValue) does not support direct value setting")
         }
         
         // Set the value directly using Accessibility API
-        try await accessibilityDriver.setValue(value, for: elementID)
+        try await accessibilityDriver.setValue(value, for: elementID, in: window)
         
         // Get the actual value to verify
         let actualValue = try await getValue(from: elementID)
@@ -360,7 +286,12 @@ public actor AppPilot {
     /// - Returns: The element's value as a string, or `nil` if no value is available
     /// - Throws: `PilotError.elementNotAccessible` if the element is no longer available
     public func getValue(from elementID: String) async throws -> String? {
-        return try await accessibilityDriver.value(for: elementID)
+        // Find the window that contains this element
+        guard let window = elementWindowMapping[elementID] else {
+            throw PilotError.elementNotAccessible(elementID)
+        }
+        
+        return try await accessibilityDriver.value(for: elementID, in: window)
     }
     
     /// Check if element exists and is valid by ID
@@ -369,45 +300,16 @@ public actor AppPilot {
     /// - Returns: `true` if the element exists and is accessible, `false` otherwise
     /// - Throws: Accessibility-related errors if permission is denied
     public func elementExists(elementID: String) async throws -> Bool {
-        return try await accessibilityDriver.elementExists(with: elementID)
+        // Find the window that contains this element
+        guard let window = elementWindowMapping[elementID] else {
+            return false
+        }
+        
+        return try await accessibilityDriver.elementExists(with: elementID, in: window)
     }
     
     // MARK: - Wait Operations
     
-    /// Wait for element to appear
-    /// 
-    /// Polls for a UI element to become available within the specified timeout period.
-    /// This is useful when waiting for UI changes, such as loading indicators to appear
-    /// or dialog boxes to be shown.
-    /// 
-    /// The method checks for the element every 0.5 seconds until it appears or the timeout is reached.
-    /// 
-    /// - Parameters:
-    ///   - window: The window to search for the element in
-    ///   - role: The accessibility role of the element to wait for (e.g., .button, .field)
-    ///   - title: The title/label of the element to wait for
-    ///   - timeout: Maximum time to wait in seconds (default: 10.0)
-    /// - Returns: The UI element once it appears
-    /// - Throws: `PilotError.timeout` if the element doesn't appear within the timeout period
-    public func waitForElement(
-        in window: WindowHandle,
-        role: Role,
-        title: String,
-        timeout: TimeInterval = 10.0
-    ) async throws -> AXElement {
-        let startTime = Date()
-        while Date().timeIntervalSince(startTime) < timeout {
-            do {
-                let element = try await findElement(in: window, role: role, title: title)
-                return element
-            } catch PilotError.elementNotFound {
-                // Element not found yet, wait and retry
-                try await wait(.time(seconds: 0.5))
-            }
-        }
-        
-        throw PilotError.timeout(timeout)
-    }
     
     /// Wait for condition
     /// 
@@ -422,37 +324,11 @@ public actor AppPilot {
     /// ```swift
     /// // Wait for a specific time
     /// try await pilot.wait(.time(seconds: 2.0))
-    /// 
-    /// // Wait for an element to appear
-    /// try await pilot.wait(.elementAppear(window, .button, "Submit"))
-    /// 
-    /// // Wait for an element to disappear
-    /// try await pilot.wait(.elementDisappear(window, .dialog, "Loading"))
     /// ```
     public func wait(_ spec: WaitSpec) async throws {
         switch spec {
         case .time(let seconds):
             try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
-            
-        case .elementAppear(let window, let role, let title):
-            let _ = try await waitForElement(in: window, role: role, title: title)
-            
-        case .elementDisappear(let window, let role, let title):
-            let startTime = Date()
-            let timeout: TimeInterval = 10.0
-            
-            while Date().timeIntervalSince(startTime) < timeout {
-                do {
-                    let _ = try await findElement(in: window, role: role, title: title)
-                    // Element still exists, wait and retry
-                    try await wait(.time(seconds: 0.5))
-                } catch PilotError.elementNotFound {
-                    // Element disappeared
-                    return
-                }
-            }
-            
-            throw PilotError.timeout(timeout)
             
         case .uiChange(_, let timeout):
             // Simplified implementation - just wait for time
@@ -515,6 +391,7 @@ public actor AppPilot {
             try await wait(.time(seconds: 0.5))
         }
     }
+    
     
     /// Validate that coordinates are within window bounds
     private func validateCoordinates(_ point: Point, for window: WindowHandle) async throws {
@@ -852,13 +729,22 @@ public actor AppPilot {
         into elementID: String,
         with composition: CompositionType
     ) async throws -> ActionResult {
-        // Verify element is accessible and is a text input
-        guard try await accessibilityDriver.elementExists(with: elementID) else {
+        // Find the window that contains this element
+        guard let window = elementWindowMapping[elementID] else {
             throw PilotError.elementNotAccessible(elementID)
         }
         
-        // Find element to check if it's a text input
-        guard let element = try await findElement(by: elementID) else {
+        // Verify element is accessible and is a text input
+        guard try await accessibilityDriver.elementExists(with: elementID, in: window) else {
+            throw PilotError.elementNotAccessible(elementID)
+        }
+        
+        // Get element info using AXDumper directly
+        guard let bundleID = try await getBundleIDForWindow(window) else {
+            throw PilotError.elementNotAccessible(elementID)
+        }
+        
+        guard let element = try? AXDumper.element(id: elementID, bundleIdentifier: bundleID) else {
             throw PilotError.elementNotAccessible(elementID)
         }
         
@@ -867,7 +753,7 @@ public actor AppPilot {
         }
         
         guard element.isTextInputElement else {
-            throw PilotError.invalidArgument("Element \(element.role?.rawValue ?? "unknown") is not a text input field")
+            throw PilotError.invalidArgument("Element \(element.role.rawValue) is not a text input field")
         }
         
         // Focus the element first
@@ -918,8 +804,14 @@ public actor AppPilot {
         at index: Int,
         for elementID: String
     ) async throws -> ActionResult {
-        // Find element for result data
-        guard let element = try await findElement(by: elementID) else {
+        // Get element info using AXDumper directly
+        guard let window = elementWindowMapping[elementID] else {
+            throw PilotError.elementNotAccessible(elementID)
+        }
+        guard let bundleID = try await getBundleIDForWindow(window) else {
+            throw PilotError.elementNotAccessible(elementID)
+        }
+        guard let element = try? AXDumper.element(id: elementID, bundleIdentifier: bundleID) else {
             throw PilotError.elementNotAccessible(elementID)
         }
         
@@ -959,8 +851,14 @@ public actor AppPilot {
     public func commitComposition(
         for elementID: String
     ) async throws -> ActionResult {
-        // Find element for result data
-        guard let element = try await findElement(by: elementID) else {
+        // Get element info using AXDumper directly
+        guard let window = elementWindowMapping[elementID] else {
+            throw PilotError.elementNotAccessible(elementID)
+        }
+        guard let bundleID = try await getBundleIDForWindow(window) else {
+            throw PilotError.elementNotAccessible(elementID)
+        }
+        guard let element = try? AXDumper.element(id: elementID, bundleIdentifier: bundleID) else {
             throw PilotError.elementNotAccessible(elementID)
         }
         
@@ -1004,8 +902,14 @@ public actor AppPilot {
     public func cancelComposition(
         for elementID: String
     ) async throws -> ActionResult {
-        // Find element for result data
-        guard let element = try await findElement(by: elementID) else {
+        // Get element info using AXDumper directly
+        guard let window = elementWindowMapping[elementID] else {
+            throw PilotError.elementNotAccessible(elementID)
+        }
+        guard let bundleID = try await getBundleIDForWindow(window) else {
+            throw PilotError.elementNotAccessible(elementID)
+        }
+        guard let element = try? AXDumper.element(id: elementID, bundleIdentifier: bundleID) else {
             throw PilotError.elementNotAccessible(elementID)
         }
         
@@ -1269,7 +1173,7 @@ public actor AppPilot {
         }
         
         // Get bundle identifier for AXDumper
-        guard let bundleId = targetApp.bundleIdentifier else {
+        guard let bundleID = targetApp.bundleIdentifier else {
             throw PilotError.applicationNotFound("Bundle identifier not found")
         }
         
@@ -1281,10 +1185,15 @@ public actor AppPilot {
         
         // Use AXDumper.dump() directly with AXQuery for efficient element discovery
         let axElements = try AXDumper.dump(
-            bundleIdentifier: bundleId,
+            bundleIdentifier: bundleID,
             query: query,
             includeZeroSize: false
         )
+        
+        // Update element window mapping for efficient future operations
+        for element in axElements {
+            elementWindowMapping[element.id] = window
+        }
         
         // Create and return the elements-only snapshot
         return ElementsSnapshot(
@@ -1360,7 +1269,7 @@ public actor AppPilot {
         
         // Get bundle identifier for AXDumper
         guard let targetApp = targetApp,
-              let bundleId = targetApp.bundleIdentifier else {
+              let bundleID = targetApp.bundleIdentifier else {
             throw PilotError.applicationNotFound("Bundle identifier not found")
         }
         
@@ -1372,13 +1281,18 @@ public actor AppPilot {
         
         // Use AXDumper.dump() directly with AXQuery for efficient element discovery
         let axElements = try AXDumper.dump(
-            bundleIdentifier: bundleId,
+            bundleIdentifier: bundleID,
             query: query,
             includeZeroSize: false
         )
         
         // Use AXElements directly
         let elements = axElements
+        
+        // Update element window mapping for efficient future operations
+        for element in elements {
+            elementWindowMapping[element.id] = window
+        }
         
         // Create and return the snapshot
         return UISnapshot(
@@ -1400,28 +1314,21 @@ public actor AppPilot {
         return try await listApplications()
     }
     
-    /// Find all clickable elements in a window
-    public func findClickableElements(in window: WindowHandle) async throws -> [AXElement] {
-        let allElements = try await findElements(in: window)
-        return allElements.filter { $0.isClickableElement && $0.isEnabled }
-    }
-    
-    /// Find all text input elements in a window
-    public func findTextInputElements(in window: WindowHandle) async throws -> [AXElement] {
-        let allElements = try await findElements(in: window)
-        return allElements.filter { $0.isTextInputElement && $0.isEnabled }
-    }
     
     // MARK: - Element-based Actions
     
     /// Click on a specific UI element by ID
     public func clickElement(elementID: String, in window: WindowHandle) async throws -> ActionResult {
-        // Get element info for logging and center point calculation
-        guard let element = try await findElement(by: elementID) else {
+        // Get element info using AXDumper directly
+        guard let bundleID = try await getBundleIDForWindow(window) else {
             throw PilotError.elementNotAccessible(elementID)
         }
         
-        print("🎯 AppPilot: Clicking element \(element.role?.rawValue ?? "unknown"): \(element.description ?? elementID)")
+        guard let element = try? AXDumper.element(id: elementID, bundleIdentifier: bundleID) else {
+            throw PilotError.elementNotAccessible(elementID)
+        }
+        
+        print("🎯 AppPilot: Clicking element \(element.role.rawValue): \(element.description ?? elementID)")
         print("   Element bounds: \(element.cgBounds)")
         print("   Center point: \(element.centerPoint)")
         
@@ -1491,28 +1398,6 @@ public actor AppPilot {
         return validatedWindowID
     }
     
-    /// Find element by ID across all windows
-    private func findElement(by elementID: String) async throws -> AXElement? {
-        // Search through all applications and windows to find element with matching ID
-        let apps = try await listApplications()
-        
-        for app in apps {
-            do {
-                let windows = try await listWindows(app: app.id)
-                for window in windows {
-                    let elements = try await findElements(in: window.id)
-                    if let element = elements.first(where: { $0.id == elementID }) {
-                        return element
-                    }
-                }
-            } catch {
-                // Continue searching in other apps/windows
-                continue
-            }
-        }
-        
-        return nil
-    }
     
     // MARK: - Composition Input Helper Methods
     
@@ -1667,14 +1552,24 @@ public actor AppPilot {
     /// Extract candidate text from a potential IME window
     private func extractCandidatesFromWindow(_ window: WindowInfo) async throws -> [String] {
         do {
-            let elements = try await findElements(in: window.id)
+            // Use AXDumper to get elements directly
+            guard let bundleID = try await getBundleIDForWindow(window.id) else {
+                return []
+            }
+            
+            let elements = try AXDumper.dump(
+                bundleIdentifier: bundleID,
+                query: nil,
+                includeZeroSize: false
+            )
+            
             var candidates: [String] = []
             
             // Look for text elements that could be candidates
             let textElements = elements.filter { element in
-                (element.role?.rawValue == "Text" || 
-                 element.role?.rawValue == "Cell" || 
-                 element.role?.rawValue == "Button") &&
+                (element.role.rawValue == "Text" || 
+                 element.role.rawValue == "Cell" || 
+                 element.role.rawValue == "Button") &&
                 element.isEnabled
             }
             
@@ -1691,6 +1586,11 @@ public actor AppPilot {
             // If we can't access the window, it might not be an IME window
             return []
         }
+    }
+    
+    /// Helper method to get bundle ID for a window
+    private func getBundleIDForWindow(_ windowHandle: WindowHandle) async throws -> String? {
+        return windowHandle.bundleID
     }
     
 }

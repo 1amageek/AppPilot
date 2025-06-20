@@ -67,11 +67,11 @@ struct WindowHandleCompatibilityUnitTests {
     @Test("WindowHandle creation with different formats")
     func testWindowHandleCreation() async throws {
         // Test accessibility-based handle
-        let accessibilityHandle = WindowHandle(id: "win_ax_SceneWindow")
+        let accessibilityHandle = WindowHandle(id: "win_ax_SceneWindow", bundleID: "com.test.app")
         #expect(accessibilityHandle.id == "win_ax_SceneWindow")
         
         // Test hash-based handle  
-        let hashHandle = WindowHandle(id: "win_9A5EACFE5572C654")
+        let hashHandle = WindowHandle(id: "win_9A5EACFE5572C654", bundleID: "com.test.app")
         #expect(hashHandle.id == "win_9A5EACFE5572C654")
         
         // Test that handles are Hashable (can be used as dictionary keys)

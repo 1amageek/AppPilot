@@ -1,11 +1,41 @@
 import Testing
 import Foundation
 @testable import AppPilot
-import AXUI
+@testable import AXUI
 
 /// Unit tests for setValue functionality
 @Suite("setValue Unit Tests")
 struct SetValueUnitTests {
+    
+    // Helper function to create AXElement for testing using internal init
+    private func createTestAXElement(
+        role: AXUI.Role = .field,
+        description: String? = "Test Field",
+        identifier: String? = "test-element",
+        position: AXUI.Point? = AXUI.Point(x: 10, y: 20),
+        size: AXUI.Size? = AXUI.Size(width: 100, height: 30),
+        enabled: Bool = true,
+        selected: Bool = false,
+        focused: Bool = false
+    ) -> AXElement {
+        // Convert Role to SystemRole for internal init
+        let systemRole: SystemRole = role.possibleSystemRoles.first ?? .field
+        
+        return AXElement(
+            systemRole: systemRole,
+            description: description,
+            identifier: identifier,
+            roleDescription: nil,
+            help: nil,
+            position: position,
+            size: size,
+            selected: selected,
+            enabled: enabled,
+            focused: focused,
+            children: nil,
+            axElementRef: nil
+        )
+    }
     
     // MARK: - ActionResultData Tests
     
@@ -26,17 +56,10 @@ struct SetValueUnitTests {
     
     @Test("ActionResult with setValue data should be Codable")
     func testActionResultSetValueCodable() async throws {
-        let testElement = AXElement(
-            role: AXUI.Role.field,
+        let testElement = createTestAXElement(
+            role: .field,
             description: "Test Field",
-            identifier: "test-element",
-            roleDescription: nil,
-            help: nil,
-            position: AXUI.Point(x: 10, y: 20),
-            size: AXUI.Size(width: 100, height: 30),
-            selected: false,
-            enabled: true,
-            focused: false
+            identifier: "test-element"
         )
         
         let originalResult = ActionResult(
@@ -76,17 +99,12 @@ struct SetValueUnitTests {
         let supportedRoles: [AXUI.Role] = [.field]
         
         for role in supportedRoles {
-            let element = AXElement(
+            let element = createTestAXElement(
                 role: role,
                 description: "Test Field",
                 identifier: "test-\(role.rawValue)",
-                roleDescription: nil,
-                help: nil,
                 position: AXUI.Point(x: 0, y: 0),
-                size: AXUI.Size(width: 100, height: 30),
-                selected: false,
-                enabled: true,
-                focused: false
+                size: AXUI.Size(width: 100, height: 30)
             )
             
             // These roles should be considered text input
@@ -101,16 +119,14 @@ struct SetValueUnitTests {
         let unsupportedRoles: [AXUI.Role] = [.button, .text, .image, .link]
         
         for role in unsupportedRoles {
-            let element = AXElement(
+            let element = createTestAXElement(
                 role: role,
                 description: "Test Element",
                 identifier: "test-\(role.rawValue)",
-                roleDescription: nil,
-                help: nil,
                 position: AXUI.Point(x: 0, y: 0),
                 size: AXUI.Size(width: 100, height: 30),
-                selected: false,
                 enabled: true,
+                selected: false,
                 focused: false
             )
             
@@ -145,16 +161,14 @@ struct SetValueUnitTests {
     @Test("AXElement validation logic should work correctly")
     func testAXElementValidationLogic() async throws {
         // Test valid text field
-        let validTextField = AXElement(
+        let validTextField = createTestAXElement(
             role: AXUI.Role.field,
             description: "Name Field",
             identifier: "valid-text-field",
-            roleDescription: nil,
-            help: nil,
             position: AXUI.Point(x: 10, y: 20),
             size: AXUI.Size(width: 200, height: 30),
-            selected: false,
             enabled: true,
+            selected: false,
             focused: false
         )
         
@@ -164,16 +178,14 @@ struct SetValueUnitTests {
         #expect((validTextField.size?.height ?? 0) > 0, "Valid text field should have positive height")
         
         // Test disabled text field
-        let disabledTextField = AXElement(
+        let disabledTextField = createTestAXElement(
             role: AXUI.Role.field,
             description: "Disabled Field",
             identifier: "disabled-text-field",
-            roleDescription: nil,
-            help: nil,
             position: AXUI.Point(x: 10, y: 20),
             size: AXUI.Size(width: 200, height: 30),
-            selected: false,
             enabled: false,
+            selected: false,
             focused: false
         )
         
@@ -181,16 +193,14 @@ struct SetValueUnitTests {
         #expect(Role(rawValue: "Field")?.isTextInput ?? false, "Disabled text field should still be text input type")
         
         // Test non-text element
-        let buttonElement = AXElement(
+        let buttonElement = createTestAXElement(
             role: AXUI.Role.button,
             description: "Click Me",
             identifier: "button-element",
-            roleDescription: nil,
-            help: nil,
             position: AXUI.Point(x: 10, y: 20),
             size: AXUI.Size(width: 100, height: 30),
-            selected: false,
             enabled: true,
+            selected: false,
             focused: false
         )
         
@@ -227,35 +237,31 @@ struct SetValueUnitTests {
         // Test the logical flow that setValue would follow
         
         // 1. Element validation
-        let validElement = AXElement(
+        let validElement = createTestAXElement(
             role: AXUI.Role.field,
             description: "Test Field",
             identifier: "test-element",
-            roleDescription: nil,
-            help: nil,
             position: AXUI.Point(x: 0, y: 0),
             size: AXUI.Size(width: 100, height: 30),
-            selected: false,
             enabled: true,
+            selected: false,
             focused: false
         )
         
-        let invalidElement = AXElement(
+        let invalidElement = createTestAXElement(
             role: AXUI.Role.button,
             description: "Test Button",
             identifier: "invalid-element",
-            roleDescription: nil,
-            help: nil,
             position: AXUI.Point(x: 0, y: 0),
             size: AXUI.Size(width: 100, height: 30),
-            selected: false,
             enabled: true,
+            selected: false,
             focused: false
         )
         
         // Mock validation logic
         func validateElementForSetValue(_ element: AXElement) -> Bool {
-            guard let role = element.role else { return false }
+            let role = element.role
             return element.isEnabled && (Role(rawValue: role.rawValue)?.isTextInput == true || role == .check || role == .slider)
         }
         
@@ -303,36 +309,32 @@ struct SetValueUnitTests {
     func testSetValueTypeSafety() async throws {
         // Test that setValue enforces correct types
         
-        let textFieldElement = AXElement(
+        let textFieldElement = createTestAXElement(
             role: AXUI.Role.field,
             description: "Text Field",
             identifier: "text-field",
-            roleDescription: nil,
-            help: nil,
             position: AXUI.Point(x: 0, y: 0),
             size: AXUI.Size(width: 100, height: 30),
-            selected: false,
             enabled: true,
+            selected: false,
             focused: false
         )
         
-        let buttonElement = AXElement(
+        let buttonElement = createTestAXElement(
             role: AXUI.Role.button,
             description: "Button",
             identifier: "button",
-            roleDescription: nil,
-            help: nil,
             position: AXUI.Point(x: 0, y: 0),
             size: AXUI.Size(width: 100, height: 30),
-            selected: false,
             enabled: true,
+            selected: false,
             focused: false
         )
         
         // Mock type validation
         func isValidForSetValue(element: AXElement) -> Bool {
             let supportedRoles: Set<AXUI.Role> = [.field, .check, .slider]
-            guard let role = element.role else { return false }
+            let role = element.role
             return supportedRoles.contains(role) && element.isEnabled
         }
         
@@ -356,16 +358,14 @@ struct SetValueUnitTests {
     func testSetValuePerformanceCharacteristics() async throws {
         // Test that setValue operations are fast (unit test level)
         
-        let element = AXElement(
+        let element = createTestAXElement(
             role: AXUI.Role.field,
             description: "Performance Test",
             identifier: "perf-test-element",
-            roleDescription: nil,
-            help: nil,
             position: AXUI.Point(x: 0, y: 0),
             size: AXUI.Size(width: 200, height: 30),
-            selected: false,
             enabled: true,
+            selected: false,
             focused: false
         )
         
@@ -422,21 +422,19 @@ struct SetValueUnitTests {
         }
         
         // 2. AXElement supports necessary properties
-        let element = AXElement(
+        let element = createTestAXElement(
             role: AXUI.Role.field,
             description: "Test Field",
             identifier: "test-field-id",
-            roleDescription: "text field",
-            help: nil,
             position: AXUI.Point(x: 10, y: 20),
             size: AXUI.Size(width: 300, height: 40),
-            selected: false,
             enabled: true,
+            selected: false,
             focused: false
         )
         
         #expect(!element.id.isEmpty, "Element should have ID")
-        #expect(element.role?.rawValue == "Field", "Element should have correct role")
+        #expect(element.role.rawValue == "Field", "Element should have correct role")
         #expect(element.isEnabled, "Element should be enabled")
         #expect(element.cgBounds.width > 0, "Element should have valid bounds")
         

@@ -140,7 +140,8 @@ public class ManualCompositionTestHelper {
             print("✅ Found TestApp Keyboard window")
             
             // Find text input field
-            let textFields = try await pilot.findTextInputElements(in: keyboardWindow.id)
+            let snapshot = try await pilot.elementsSnapshot(window: keyboardWindow.id)
+            let textFields = snapshot.textInputElements
             guard let textField = textFields.first(where: { $0.isEnabled }) else {
                 print("❌ No text input field found in TestApp")
                 return
@@ -238,11 +239,12 @@ public class ManualCompositionTestHelper {
     }
     
     private func extractCandidatesFromWindow(_ window: WindowInfo) async throws -> [String] {
-        let elements = try await pilot.findElements(in: window.id)
+        let snapshot = try await pilot.elementsSnapshot(window: window.id)
+        let elements = snapshot.elements
         var candidates: [String] = []
         
         for element in elements {
-            if (element.role?.rawValue == "Text" || element.role?.rawValue == "Cell" || element.role?.rawValue == "Button"),
+            if (element.role.rawValue == "Text" || element.role.rawValue == "Cell" || element.role.rawValue == "Button"),
                let text = element.description,
                !text.isEmpty,
                !text.isSystemUIText() {

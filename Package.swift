@@ -22,7 +22,8 @@ let package = Package(
         .testTarget(
             name: "AppPilotTests",
             dependencies: [
-                "AppPilot"
+                "AppPilot",
+                "AXUI"
             ]
         ),
     ]

@@ -69,7 +69,7 @@ struct CGWindowIDImplementationTests {
         print("   ✅ CGWindowID mismatch error handled correctly")
         
         print("✅ Testing PilotError.cgWindowIDUnavailable...")
-        let unavailableError = PilotError.cgWindowIDUnavailable(WindowHandle(id: "test"))
+        let unavailableError = PilotError.cgWindowIDUnavailable(WindowHandle(id: "test", bundleID: "com.test.app"))
         let unavailableDescription = unavailableError.localizedDescription  
         #expect(unavailableDescription.contains("CGWindowID unavailable"), "Error should describe CGWindowID unavailability")
         print("   ✅ CGWindowID unavailable error handled correctly")

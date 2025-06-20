@@ -4,6 +4,7 @@ import AppKit
 import AXUI
 import OSLog
 import Carbon
+import CryptoKit
 
 // MARK: - Accessibility Constants
 
@@ -16,19 +17,20 @@ private let kAXWindowNumberAttribute = "AXWindowNumber"
 public protocol AccessibilityDriver: Sendable {
     // Application and Window Management
     func getApplications() async throws -> [AppInfo]
-    func findApplication(bundleId: String) async throws -> AppHandle
+    func findApplication(bundleID: String) async throws -> AppHandle
     func findApplication(name: String) async throws -> AppHandle
     func getWindows(for app: AppHandle) async throws -> [WindowInfo]
     func findWindow(app: AppHandle, title: String) async throws -> WindowHandle?
     func findWindow(app: AppHandle, index: Int) async throws -> WindowHandle?
     func findWindowHandle(byCGWindowID cgWindowID: UInt32) async throws -> WindowHandle?
     
-    // UI Element Discovery (ID-based)
-    func findElements(in window: WindowHandle, role: Role?, title: String?, identifier: String?) async throws -> [AXElement]
-    func findElement(in window: WindowHandle, role: Role, title: String?, identifier: String?) async throws -> AXElement
-    func elementExists(with id: String) async throws -> Bool
-    func value(for id: String) async throws -> String?
-    func setValue(_ value: String, for id: String) async throws
+    // UI Element Discovery
+    func findElements(in window: WindowHandle, query: AXUI.AXQuery) async throws -> [AXElement]
+    
+    // Element Operations (ID-based)
+    func elementExists(with id: String, in window: WindowHandle) async throws -> Bool
+    func value(for id: String, in window: WindowHandle) async throws -> String?
+    func setValue(_ value: String, for id: String, in window: WindowHandle) async throws
     
     // Event Monitoring
     func observeEvents(for window: WindowHandle, mask: AXMask) async -> AsyncStream<AXEvent>
@@ -85,11 +87,11 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
         return apps.sorted { $0.name < $1.name }
     }
     
-    public func findApplication(bundleId: String) async throws -> AppHandle {
+    public func findApplication(bundleID: String) async throws -> AppHandle {
         let runningApps = NSWorkspace.shared.runningApplications
         
-        guard let app = runningApps.first(where: { $0.bundleIdentifier == bundleId }) else {
-            throw PilotError.applicationNotFound(bundleId)
+        guard let app = runningApps.first(where: { $0.bundleIdentifier == bundleID }) else {
+            throw PilotError.applicationNotFound(bundleID)
         }
         
         return try await generateAppHandle(for: app)
@@ -131,7 +133,7 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
         var windows: [WindowInfo] = []
         
         for (index, axWindow) in axWindows.enumerated() {
-            let windowHandle = generateWindowHandle(for: axWindow, appHandle: appHandle)
+            let windowHandle = try generateWindowHandle(for: axWindow, appHandle: appHandle)
             
             let title = getStringAttribute(from: axWindow, attribute: kAXTitleAttribute)
             let isMain = getBoolAttribute(from: axWindow, attribute: kAXMainAttribute) ?? false
@@ -213,21 +215,20 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
     
     // MARK: - UI Element Discovery
     
-    public func findElements(in windowHandle: WindowHandle, role: Role?, title: String?, identifier: String?) async throws -> [AXElement] {
-        
+    public func findElements(in windowHandle: WindowHandle, query: AXUI.AXQuery) async throws -> [AXElement] {
         // Check accessibility permission first
         guard await checkPermission() else {
             throw PilotError.permissionDenied("Accessibility permission required. Please grant access in System Settings > Privacy & Security > Accessibility")
         }
         
         guard let windowData = findCanonicalWindowHandle(windowHandle.id) else {
-            logWindowHandleResolutionFailure(windowHandle.id, context: "findElements")
+            logWindowHandleResolutionFailure(windowHandle.id, context: "findElements(query)")
             throw PilotError.windowNotFound(windowHandle)
         }
         
         // Use AXUI to get the bundle identifier for this window's app
         guard let appData = appHandles[windowData.appHandle.id],
-              let bundleId = appData.app.bundleIdentifier else {
+              let bundleID = appData.app.bundleIdentifier else {
             throw PilotError.applicationNotFound(windowData.appHandle.id)
         }
         
@@ -237,39 +238,13 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
             throw PilotError.windowNotFound(windowHandle)
         }
         
-        // Use AXUI's flat element dumping
-        let axElements = try AXDumper.dumpWindow(bundleIdentifier: bundleId, windowIndex: windowIndex)
-        
-        // Convert Role to AXUI.Role for filtering
-        let axuiRole: AXUI.Role? = role.flatMap { roleToAXUIRole($0) }
-        
-        // Apply precise filtering with AND logic
-        return filterElementsWithANDLogic(axElements, role: axuiRole, title: title, identifier: identifier)
+        // Use AXDumper.dumpWindow with AXQuery for efficient filtering
+        return try AXDumper.dumpWindow(
+            bundleIdentifier: bundleID,
+            windowIndex: windowIndex,
+            query: query
+        )
     }
-    
-    public func findElement(in window: WindowHandle, role: Role, title: String? = nil, identifier: String? = nil) async throws -> AXElement {
-        // At least one of title or identifier must be provided
-        guard title != nil || identifier != nil else {
-            throw PilotError.invalidArgument("Either title or identifier must be provided")
-        }
-        
-        let elements = try await findElements(in: window, role: role, title: title, identifier: identifier)
-        
-        // Handle results with improved logic
-        switch elements.count {
-        case 0:
-            let criteria = [title.map {"title: '\($0)'"}, identifier.map {"identifier: '\($0)'"}].compactMap {$0}.joined(separator: ", ")
-            throw PilotError.elementNotFound(role: role.rawValue, title: "\(role.rawValue) with \(criteria)")
-        case 1:
-            return elements[0]
-        default:
-            // Multiple matches - use refined selection logic
-            let refined = selectBestMatch(from: elements, role: role.rawValue, title: title, identifier: identifier)
-            return refined
-        }
-    }
-    
-    
     
     /// Find the canonical handle for a window using comprehensive lookup strategy
     private func findCanonicalWindowHandle(_ handleId: String) -> WindowHandleData? {
@@ -308,8 +283,11 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
                 if regeneratedID == handleId {
                     // Found the window! Update our cache
                     let axPointerHash = Int(bitPattern: Unmanaged.passUnretained(axWindow).toOpaque())
+                    guard let bundleID = appData.app.bundleIdentifier else {
+                        continue  // Skip windows from apps without bundle ID
+                    }
                     let windowData = WindowHandleData(
-                        handle: WindowHandle(id: handleId),
+                        handle: WindowHandle(id: handleId, bundleID: bundleID),
                         appHandle: appData.handle,
                         axWindow: axWindow,
                         axPointerHash: axPointerHash
@@ -390,11 +368,11 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
         }
         
         // Generate deterministic app handle based on bundle ID and process ID
-        let bundleId = app.bundleIdentifier ?? "unknown"
+        let bundleID = app.bundleIdentifier ?? "unknown"
         let processId = app.processIdentifier
         
         var hasher = Hasher()
-        hasher.combine(bundleId)
+        hasher.combine(bundleID)
         hasher.combine(processId)
         let hash = abs(hasher.finalize())
         
@@ -418,13 +396,19 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
         return handle
     }
     
-    private func generateWindowHandle(for axWindow: AXUIElement, appHandle: AppHandle) -> WindowHandle {
+    private func generateWindowHandle(for axWindow: AXUIElement, appHandle: AppHandle) throws -> WindowHandle {
         // Get AXUIElement pointer hash for consistency
         let axPointerHash = Int(bitPattern: Unmanaged.passUnretained(axWindow).toOpaque())
         
         // Check if we already have a WindowHandle for this exact AXUIElement (by pointer)
         if let existingData = windowHandles.values.first(where: { $0.axPointerHash == axPointerHash }) {
             return existingData.handle
+        }
+        
+        // Get bundle ID from app handle - this is required
+        guard let appData = appHandles[appHandle.id],
+              let bundleID = appData.app.bundleIdentifier else {
+            throw PilotError.applicationNotFound(appHandle.id)
         }
         
         // Try to use CGWindowID as primary key (correct system specification approach)
@@ -444,8 +428,8 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
                 return existingData.handle
             }
             
-            // Create new CGWindowID-based handle
-            let handle = WindowHandle(id: windowId)
+            // Create new CGWindowID-based handle with bundleID
+            let handle = WindowHandle(id: windowId, bundleID: bundleID)
             let windowData = WindowHandleData(
                 handle: handle,
                 appHandle: appHandle,
@@ -470,8 +454,8 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
             return existingData.handle
         }
         
-        // Create new property-based window handle
-        let handle = WindowHandle(id: consistentID)
+        // Create new property-based window handle with bundleID
+        let handle = WindowHandle(id: consistentID, bundleID: bundleID)
         
         let windowData = WindowHandleData(
             handle: handle,
@@ -622,12 +606,12 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
         let positionResult = AXUIElementCopyAttributeValue(window, kAXPositionAttribute as CFString, &positionValue)
         
         guard positionResult == .success, let position = positionValue as! AXValue? else {
-            throw PilotError.accessibilityTreeUnavailable(WindowHandle(id: "unknown"))
+            throw PilotError.accessibilityTreeUnavailable(WindowHandle(id: "unknown", bundleID: "unknown"))
         }
         
         var windowOrigin = CGPoint.zero
         guard AXValueGetValue(position, .cgPoint, &windowOrigin) else {
-            throw PilotError.accessibilityTreeUnavailable(WindowHandle(id: "unknown"))
+            throw PilotError.accessibilityTreeUnavailable(WindowHandle(id: "unknown", bundleID: "unknown"))
         }
         
         // Get size
@@ -635,12 +619,12 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
         let sizeResult = AXUIElementCopyAttributeValue(window, kAXSizeAttribute as CFString, &sizeValue)
         
         guard sizeResult == .success, let size = sizeValue as! AXValue? else {
-            throw PilotError.accessibilityTreeUnavailable(WindowHandle(id: "unknown"))
+            throw PilotError.accessibilityTreeUnavailable(WindowHandle(id: "unknown", bundleID: "unknown"))
         }
         
         var windowSize = CGSize.zero
         guard AXValueGetValue(size, .cgSize, &windowSize) else {
-            throw PilotError.accessibilityTreeUnavailable(WindowHandle(id: "unknown"))
+            throw PilotError.accessibilityTreeUnavailable(WindowHandle(id: "unknown", bundleID: "unknown"))
         }
         
         return CGRect(origin: windowOrigin, size: windowSize)
@@ -649,176 +633,88 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
     
     // MARK: - Element Value Operations (ID-based)
     
-    public func value(for id: String) async throws -> String? {
-        // Find element by ID using AXUI
-        guard let element = try await findElement(by: id) else {
+    public func value(for id: String, in window: WindowHandle) async throws -> String? {
+        // Get window information to determine bundle identifier
+        guard let windowData = findCanonicalWindowHandle(window.id),
+              let appData = appHandles[windowData.appHandle.id],
+              let bundleID = appData.app.bundleIdentifier else {
+            throw PilotError.windowNotFound(window)
+        }
+        
+        // Use AXUI's element lookup with axElementRef to get AXElement with reference
+        guard let element = try? AXDumper.element(id: id, bundleIdentifier: bundleID) else {
             throw PilotError.elementNotAccessible(id)
         }
         
-        // Return value from AXElement
-        return element.description
+        // Use AXElement's getValue method directly
+        return element.getValue()
     }
     
-    public func setValue(_ value: String, for id: String) async throws {
-        // setValue operation requires access to native AXUIElement
-        // Since AXUI's axElementRef is internal, we need to re-search for the element
-        // using the traditional AX tree traversal approach for live operations
+    public func setValue(_ value: String, for id: String, in window: WindowHandle) async throws {
+        // Get window information to determine bundle identifier
+        guard let windowData = findCanonicalWindowHandle(window.id),
+              let appData = appHandles[windowData.appHandle.id],
+              let bundleID = appData.app.bundleIdentifier else {
+            throw PilotError.windowNotFound(window)
+        }
         
-        guard let element = try await findElement(by: id) else {
+        // Use AXUI's element lookup with axElementRef to get AXElement with reference
+        guard let element = try? AXDumper.element(id: id, bundleIdentifier: bundleID) else {
             throw PilotError.elementNotAccessible(id)
         }
         
-        // Find the live AXUIElement for this element by searching all windows
-        let axElement = try await findLiveAXElementForId(id, element: element)
-        
-        // Direct value setting using AXUIElement reference
-        let result = AXUIElementSetAttributeValue(axElement, kAXValueAttribute as CFString, value as CFString)
-        
-        switch result {
-        case .success:
-            return
-        case .invalidUIElement:
-            throw PilotError.elementNotAccessible(id)
-        case .attributeUnsupported:
-            throw PilotError.invalidArgument("Element does not support value setting")
-        case .cannotComplete:
-            throw PilotError.osFailure(api: "AXUIElementSetAttributeValue", code: Int32(result.rawValue))
-        case .notImplemented:
-            throw PilotError.osFailure(api: "AXUIElementSetAttributeValue", code: Int32(result.rawValue))
-        case .illegalArgument:
-            throw PilotError.invalidArgument("Invalid value '\(value)' for element")
-        case .failure:
-            throw PilotError.osFailure(api: "AXUIElementSetAttributeValue", code: Int32(result.rawValue))
-        default:
-            throw PilotError.osFailure(api: "AXUIElementSetAttributeValue", code: Int32(result.rawValue))
+        // Verify element is a text input field
+        guard element.isTextInput && element.isEnabled else {
+            throw PilotError.invalidArgument("Element is not an enabled text input field")
         }
+        
+        // Use AXElement's setValue method directly
+        try element.setValue(value)
     }
     
-    public func elementExists(with id: String) async throws -> Bool {
-        // Use AXUI to check if element exists by ID
-        return (try await findElement(by: id)) != nil
+    // Find all text fields recursively
+    private func findAllTextFields(in rootElement: AXUIElement) -> [AXUIElement] {
+        var textFields: [AXUIElement] = []
+        
+        // Check if this element is a text field
+        var roleRef: CFTypeRef?
+        AXUIElementCopyAttributeValue(rootElement, kAXRoleAttribute as CFString, &roleRef)
+        if let role = roleRef as? String, role == "AXTextField" {
+            textFields.append(rootElement)
+        }
+        
+        // Get children and search recursively
+        var childrenRef: CFTypeRef?
+        let result = AXUIElementCopyAttributeValue(
+            rootElement,
+            kAXChildrenAttribute as CFString,
+            &childrenRef
+        )
+        
+        if result == .success,
+           let childrenArray = childrenRef as? [AXUIElement] {
+            for child in childrenArray {
+                textFields.append(contentsOf: findAllTextFields(in: child))
+            }
+        }
+        
+        return textFields
     }
     
-    // MARK: - Helper Methods for Improved Element Discovery
-    
-    
-    private func filterElementsWithANDLogic(_ elements: [AXElement], role: AXUI.Role?, title: String?, identifier: String?) -> [AXElement] {
-        return elements.compactMap { element in
-            // AND logic: all specified criteria must match
-            
-            // Role matching - compare against AXElement's role
-            if let role = role, element.role != role {
-                return nil
-            }
-            
-            // Title matching (case-insensitive, partial match)
-            if let title = title {
-                guard let elementTitle = element.description,
-                      elementTitle.localizedCaseInsensitiveContains(title) else {
-                    return nil
-                }
-            }
-            
-            // Identifier matching (exact match)
-            if let identifier = identifier, element.identifier != identifier {
-                return nil
-            }
-            
-            // Additional quality filters using AXElement properties
-            let bounds = element.cgBounds
-            guard element.isEnabled &&
-                   bounds.width > 0 &&
-                   bounds.height > 0 else {
-                return nil
-            }
-            
-            return element
+    public func elementExists(with id: String, in window: WindowHandle) async throws -> Bool {
+        // Get window information to determine bundle identifier
+        guard let windowData = findCanonicalWindowHandle(window.id),
+              let appData = appHandles[windowData.appHandle.id],
+              let bundleID = appData.app.bundleIdentifier else {
+            throw PilotError.windowNotFound(window)
         }
+        
+        // Use AXUI's efficient element lookup
+        return (try? AXDumper.element(id: id, bundleIdentifier: bundleID)) != nil
     }
     
-    private func selectBestMatch(from elements: [AXElement], role: String, title: String?, identifier: String?) -> AXElement {
-        // 1. If identifier is specified, prefer exact identifier matches
-        if let identifier = identifier {
-            let identifierMatches = elements.filter { element in
-                element.identifier == identifier
-            }
-            
-            if identifierMatches.count == 1 {
-                return identifierMatches[0]
-            }
-            
-            if !identifierMatches.isEmpty {
-                // If multiple identifier matches, prefer enabled and visible ones
-                let qualityMatches = identifierMatches.filter { element in
-                    let bounds = element.cgBounds
-                    return element.isEnabled && bounds.width > 0 && bounds.height > 0
-                }
-                return qualityMatches.isEmpty ? identifierMatches[0] : qualityMatches[0]
-            }
-        }
-        
-        // 2. If title is specified, prefer exact title matches
-        if let title = title {
-            let exactTitleMatches = elements.filter { element in
-                element.description?.lowercased() == title.lowercased()
-            }
-            
-            if exactTitleMatches.count == 1 {
-                return exactTitleMatches[0]
-            }
-            
-            if !exactTitleMatches.isEmpty {
-                // If multiple exact title matches, prefer enabled and visible ones
-                let qualityMatches = exactTitleMatches.filter { element in
-                    let bounds = element.cgBounds
-                    return element.isEnabled && bounds.width > 0 && bounds.height > 0
-                }
-                return qualityMatches.isEmpty ? exactTitleMatches[0] : qualityMatches[0]
-            }
-        }
-        
-        // 3. Fallback: prefer enabled and visible elements
-        let qualityMatches = elements.filter { element in
-            let bounds = element.cgBounds
-            return element.isEnabled && bounds.width > 0 && bounds.height > 0
-        }
-        
-        if !qualityMatches.isEmpty {
-            return qualityMatches[0]
-        }
-        
-        // 4. Last resort: return the first element
-        return elements[0]
-    }
     
-    // MARK: - ID-based Element Lookup
-    
-    private func findElement(by elementId: String) async throws -> AXElement? {
-        // Search through all windows for the element
-        for (_, windowData) in windowHandles {
-            do {
-                let bundleId = appHandles[windowData.appHandle.id]?.app.bundleIdentifier ?? ""
-                let windowIndex = try await getWindowIndex(for: windowData.handle)
-                
-                // Use AXUI to dump elements and find by ID
-                let elements = try AXDumper.dumpWindow(
-                    bundleIdentifier: bundleId,
-                    windowIndex: windowIndex,
-                    includeZeroSize: false
-                )
-                
-                // Find element with matching ID
-                if let element = elements.first(where: { $0.id == elementId }) {
-                    return element
-                }
-            } catch {
-                // Continue searching in other windows
-                continue
-            }
-        }
-        
-        return nil
-    }
+    // MARK: - Window Management Helpers
     
     private func getWindowIndex(for windowHandle: WindowHandle) async throws -> Int {
         guard let windowData = findCanonicalWindowHandle(windowHandle.id),
@@ -832,76 +728,6 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
         }
         
         return index
-    }
-    
-    /// Find live AXUIElement for an element ID by searching AX tree
-    private func findLiveAXElementForId(_ id: String, element: AXElement) async throws -> AXUIElement {
-        // Search through all windows to find a live AXUIElement matching the element properties
-        for (_, windowData) in windowHandles {
-            if let foundElement = try? await findElementInAXTree(windowData.axWindow, targetElement: element) {
-                return foundElement
-            }
-        }
-        
-        throw PilotError.elementNotAccessible(id)
-    }
-    
-    /// Search AX tree for an element matching the target AXElement
-    private func findElementInAXTree(_ rootAXElement: AXUIElement, targetElement: AXElement, depth: Int = 0, maxDepth: Int = 10) async throws -> AXUIElement {
-        guard depth < maxDepth else {
-            throw PilotError.elementNotAccessible(targetElement.id)
-        }
-        
-        // Check if current element matches the target element
-        if axElementMatches(rootAXElement, target: targetElement) {
-            return rootAXElement
-        }
-        
-        // Search children
-        var childrenRef: CFTypeRef?
-        let result = AXUIElementCopyAttributeValue(rootAXElement, kAXChildrenAttribute as CFString, &childrenRef)
-        
-        if result == .success, let children = childrenRef as? [AXUIElement] {
-            for child in children {
-                if let found = try? await findElementInAXTree(child, targetElement: targetElement, depth: depth + 1, maxDepth: maxDepth) {
-                    return found
-                }
-            }
-        }
-        
-        throw PilotError.elementNotAccessible(targetElement.id)
-    }
-    
-    /// Check if AXUIElement matches target AXElement
-    private func axElementMatches(_ axElement: AXUIElement, target: AXElement) -> Bool {
-        let role = getStringAttribute(from: axElement, attribute: kAXRoleAttribute)
-        let description = getStringAttribute(from: axElement, attribute: kAXDescriptionAttribute)
-        let identifier = getStringAttribute(from: axElement, attribute: kAXIdentifierAttribute)
-        let position = getPositionAttribute(from: axElement)
-        let size = getSizeAttribute(from: axElement)
-        
-        // Match based on role, identifier, and position/size
-        let roleMatches = role == target.role?.rawValue
-        let identifierMatches = identifier == target.identifier
-        let descriptionMatches = description == target.description
-        
-        // Position/size matching with small tolerance
-        let positionMatches: Bool = {
-            guard let pos = position, let targetPos = target.position else { 
-                return position == nil && target.position == nil 
-            }
-            return abs(pos.x - targetPos.x) < 2 && abs(pos.y - targetPos.y) < 2
-        }()
-        
-        let sizeMatches: Bool = {
-            guard let sz = size, let targetSz = target.size else { 
-                return size == nil && target.size == nil 
-            }
-            return abs(sz.width - targetSz.width) < 2 && abs(sz.height - targetSz.height) < 2
-        }()
-        
-        // Element matches if role and identifier match and at least one other property matches
-        return roleMatches && identifierMatches && (descriptionMatches || (positionMatches && sizeMatches))
     }
     
     
@@ -1016,7 +842,7 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
     /// Verify that a window actually belongs to the expected application using multiple validation methods
     private func verifyWindowOwnership(axWindow: AXUIElement, expectedApp: AppHandleData) async throws -> WindowOwnershipInfo {
         let expectedPID = expectedApp.app.processIdentifier
-        let expectedBundleId = expectedApp.app.bundleIdentifier
+        let expectedBundleID = expectedApp.app.bundleIdentifier
         let expectedAppName = expectedApp.app.localizedName
         
         // Method 1: Process ID verification (most reliable)
@@ -1029,22 +855,22 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
                 let runningApps = NSWorkspace.shared.runningApplications
                 let actualApp = runningApps.first { $0.processIdentifier == actualPID }
                 let actualOwner = actualApp?.localizedName ?? "Unknown"
-                let actualBundleId = actualApp?.bundleIdentifier ?? "Unknown"
+                let actualBundleID = actualApp?.bundleIdentifier ?? "Unknown"
                 
                 logger.debug("Window PID mismatch: expected \(expectedPID), actual \(actualPID) (\(actualOwner, privacy: .public))")
                 
                 return WindowOwnershipInfo(
                     verified: false,
-                    issue: "Window PID (\(actualPID)) ≠ Expected PID (\(expectedPID)). Window belongs to '\(actualOwner)' (\(actualBundleId))",
+                    issue: "Window PID (\(actualPID)) ≠ Expected PID (\(expectedPID)). Window belongs to '\(actualOwner)' (\(actualBundleID))",
                     actualOwner: actualOwner
                 )
             }
         }
         
         // Method 2: Bundle ID verification (fallback)
-        if let expectedBundleId = expectedBundleId,
-           let windowBundleId = getWindowBundleId(from: axWindow) {
-            if windowBundleId == expectedBundleId {
+        if let expectedBundleID = expectedBundleID,
+           let windowBundleID = getWindowBundleID(from: axWindow) {
+            if windowBundleID == expectedBundleID {
                 logger.debug("Window ownership verified by Bundle ID (PID unavailable) for \(expectedAppName ?? "Unknown", privacy: .public)")
                 return WindowOwnershipInfo(
                     verified: true,
@@ -1052,11 +878,11 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
                     actualOwner: nil
                 )
             } else {
-                logger.debug("Window Bundle ID mismatch: expected \(expectedBundleId, privacy: .public), actual \(windowBundleId, privacy: .public)")
+                logger.debug("Window Bundle ID mismatch: expected \(expectedBundleID, privacy: .public), actual \(windowBundleID, privacy: .public)")
                 return WindowOwnershipInfo(
                     verified: false,
-                    issue: "Window Bundle ID (\(windowBundleId)) ≠ Expected Bundle ID (\(expectedBundleId))",
-                    actualOwner: "Bundle ID: \(windowBundleId)"
+                    issue: "Window Bundle ID (\(windowBundleID)) ≠ Expected Bundle ID (\(expectedBundleID))",
+                    actualOwner: "Bundle ID: \(windowBundleID)"
                 )
             }
         }
@@ -1098,8 +924,8 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
     /// Get bundle identifier from an application AXUIElement
     private func getApplicationBundleId(from axApp: AXUIElement) -> String? {
         // Try to get bundle identifier attribute
-        if let bundleId = getStringAttribute(from: axApp, attribute: "AXBundleIdentifier") {
-            return bundleId
+        if let bundleID = getStringAttribute(from: axApp, attribute: "AXBundleIdentifier") {
+            return bundleID
         }
         
         // Alternative: try to get process ID and look up bundle ID
@@ -1137,7 +963,7 @@ public actor DefaultAccessibilityDriver: AccessibilityDriver {
     }
     
     /// Get bundle identifier from a window AXUIElement
-    private func getWindowBundleId(from axWindow: AXUIElement) -> String? {
+    private func getWindowBundleID(from axWindow: AXUIElement) -> String? {
         // Try to get the parent application first
         if let parentApp = getParentApplication(from: axWindow) {
             return getApplicationBundleId(from: parentApp)
